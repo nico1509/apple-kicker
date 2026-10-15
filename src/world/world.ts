@@ -106,14 +106,14 @@ export class World {
     const deadline = performance.now() + BUILD_BUDGET_MS;
     while (performance.now() < deadline) {
       if (!this.pending) {
-        let next = -1;
+        let next: number | null = null;
         for (let k = lo; k <= hi; k++) {
           if (!this.chunks.has(k)) {
             next = k;
             break;
           }
         }
-        if (next < 0) return;
+        if (next === null) return;
         this.pending = { i: next, gen: this.buildChunkGen(next) };
       }
       if (this.pending.gen.next().done) this.pending = null;

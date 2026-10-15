@@ -239,7 +239,7 @@ export class Decor {
     let prevZ = 0;
     const first = Math.ceil(p0 / step) * step;
     // Bridge to the last post of a fenced previous chunk.
-    if (this.fenceOn(i - 1, side) && this.terrain.biomeAt(first - step, side) === 'meadow') {
+    if (i - 1 >= -CFG.chunk.behind && this.fenceOn(i - 1, side) && this.terrain.biomeAt(first - step, side) === 'meadow') {
       const pp = first - step;
       prevX = this.terrain.pathCenterX(pp) + d;
       prevZ = -pp;

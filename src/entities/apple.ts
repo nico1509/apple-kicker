@@ -42,6 +42,8 @@ export class Apple {
   private readonly body: THREE.Mesh;
   private bounceCooldown = 0;
   private hitCooldown = 0;
+  /** While positive the apple is hopping over a low obstacle (twig, root). */
+  private hopCooldown = 0;
 
   constructor(
     private readonly world: World,
@@ -122,8 +124,9 @@ export class Apple {
     this.sinceKick = 0;
   }
 
-  /** Gentle push, e.g. from the player walking into the apple. */
+  /** Gentle push, e.g. from the player walking into the apple. Never slows it down. */
   nudge(vx: number, vz: number): void {
+    if (Math.hypot(this.vel.x, this.vel.z) > Math.hypot(vx, vz)) return;
     this.vel.x = vx;
     this.vel.z = vz;
     if (this.vel.y < 0) this.vel.y = 0;
@@ -134,6 +137,7 @@ export class Apple {
     this.sinceKick += dt;
     this.bounceCooldown -= dt;
     this.hitCooldown -= dt;
+    this.hopCooldown -= dt;
     this.accumulator += dt;
     let steps = 0;
     while (this.accumulator >= SUBSTEP && steps < MAX_SUBSTEPS) {
@@ -240,6 +244,37 @@ export class Apple {
     world.colliders.forEachNear(pos.z, (col) => {
       const c = sphereContact(col, pos.x, pos.y, pos.z, r, this.contact);
       if (!c) return;
+      // Low obstacles (twigs, roots: thin capsules) are rolled over, not bounced
+      // off, when the apple arrives rolling with some speed.
+      if (col.kind === 'capsule' && col.r <= 0.16) {
+        if (this.hopCooldown > 0) {
+          // Hop in progress: slide over the obstacle without the wall response.
+          pos.x += c.nx * c.depth;
+          pos.y += c.ny * c.depth;
+          pos.z += c.nz * c.depth;
+          const vn2 = vel.x * c.nx + vel.y * c.ny + vel.z * c.nz;
+          if (vn2 < 0) {
+            vel.x -= c.nx * vn2;
+            vel.y -= c.ny * vn2;
+            vel.z -= c.nz * vn2;
+          }
+          return;
+        }
+        const hs = Math.hypot(vel.x, vel.z);
+        if (c.ny > 0.15 && hs > 1.5) {
+          pos.y += c.depth + 0.01;
+          vel.y = Math.max(vel.y, Math.min(2.5, 0.35 * hs));
+          vel.x *= 0.85;
+          vel.z *= 0.85;
+          this.hopCooldown = 0.3;
+          this.resting = false;
+          if (this.hitCooldown <= 0) {
+            this.events.onHit(hs * 0.4);
+            this.hitCooldown = 0.1;
+          }
+          return;
+        }
+      }
       pos.x += c.nx * c.depth;
       pos.y += c.ny * c.depth;
       pos.z += c.nz * c.depth;

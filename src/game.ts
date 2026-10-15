@@ -294,6 +294,7 @@ export class Game {
   };
 
   private readonly onKeyDown = (e: KeyboardEvent): void => {
+    if (e.repeat) return;
     if (e.code === 'KeyM') {
       this.audio.setMuted(!this.audio.muted);
       this.hud.message(this.audio.muted ? 'Ton aus' : 'Ton an', 900);
@@ -472,7 +473,7 @@ export class Game {
   // Debug / automation helpers (used by the smoke test)
 
   debugKick(dx: number, dy: number, foot: Foot, chip = false): void {
-    this.input.injectKick({ foot, dx, dy, chip, tap: false });
+    this.input.injectKick({ foot, dx, dy, chip, tap: false, lookAfter: 0 });
   }
 
   /** Advance the simulation deterministically without waiting for frames. */

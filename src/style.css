@@ -244,7 +244,8 @@ body {
   position: absolute;
   left: 50%;
   top: 28%;
-  transform: translate(-50%, -50%);
+  --msg-ty: -50%;
+  transform: translate(-50%, var(--msg-ty));
   background: var(--panel);
   padding: 10px 20px;
   border-radius: 14px;
@@ -265,12 +266,21 @@ body {
 
 @keyframes pop {
   from {
-    transform: translate(-50%, -50%) scale(0.85);
+    transform: translate(-50%, var(--msg-ty)) scale(0.85);
     opacity: 0;
   }
   to {
-    transform: translate(-50%, -50%) scale(1);
+    transform: translate(-50%, var(--msg-ty)) scale(1);
     opacity: 1;
+  }
+}
+
+/* Short windows: the top panels end at ~90 px, so hang the message below them. */
+@media (max-height: 460px) {
+  .message {
+    top: 96px;
+    font-size: 16px;
+    --msg-ty: 0;
   }
 }
 

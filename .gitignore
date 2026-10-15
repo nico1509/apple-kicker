@@ -4,3 +4,6 @@ dist/
 *.log
 .vite/
 screenshots/
+
+# scratch files
+trace*.mjs

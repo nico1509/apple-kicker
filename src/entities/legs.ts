@@ -63,19 +63,22 @@ export class Legs {
   readonly group = new THREE.Group();
   readonly left: Leg;
   readonly right: Leg;
-  private readonly mats: THREE.Material[];
+  private readonly mats: THREE.Material[] = [];
 
   constructor() {
     const thighMat = new THREE.MeshLambertMaterial({ color: 0x3f5a86 });
     const shinMat = new THREE.MeshLambertMaterial({ color: 0x3a5480 });
     const shoeMat = new THREE.MeshLambertMaterial({ color: 0x5a3b26 });
     const soleMat = new THREE.MeshLambertMaterial({ color: 0x2a2520 });
-    this.mats = [thighMat, shinMat, shoeMat, soleMat];
+    this.mats.push(thighMat, shinMat, shoeMat, soleMat);
     this.left = new Leg(-0.12, thighMat, shinMat, shoeMat, soleMat);
     this.right = new Leg(0.12, thighMat, shinMat, shoeMat, soleMat);
-    // A simple pelvis block anchors the two thighs.
-    const pelvis = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.16, 0.22), thighMat);
-    pelvis.position.set(0, 0.46 + 0.44 + 0.08 + 0.05, 0.01);
+    // A slim pelvis block anchors the two thighs; it sits behind the eye so it
+    // never hides the legs when looking down.
+    const pelvisMat = new THREE.MeshLambertMaterial({ color: 0x33496e });
+    this.mats.push(pelvisMat);
+    const pelvis = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.16, 0.12), pelvisMat);
+    pelvis.position.set(0, 0.46 + 0.44 + 0.08 + 0.05, 0.08);
     pelvis.castShadow = true;
     this.group.add(this.left.hip, this.right.hip, pelvis);
     this.group.name = 'legs';

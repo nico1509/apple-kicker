@@ -40,6 +40,9 @@ export class Storm {
   private time = 0;
   private readonly cloudMatDark = new THREE.MeshLambertMaterial({ color: 0x5a6270, emissive: 0x151820, flatShading: true, fog: false });
   private readonly cloudMatMid = new THREE.MeshLambertMaterial({ color: 0x7c8591, emissive: 0x1c2028, flatShading: true, fog: false });
+  private readonly cloudEmissiveDark = new THREE.Color(0x151820);
+  private readonly cloudEmissiveMid = new THREE.Color(0x1c2028);
+  private readonly curtainColor = new THREE.Color(0x5c6470);
   private readonly cloudGeo = new THREE.IcosahedronGeometry(1, 1);
   private readonly boltMat = new THREE.MeshBasicMaterial({ color: 0xf6f3ff, fog: false, toneMapped: false });
   private readonly rng = mulberry32(99);
@@ -56,7 +59,7 @@ export class Storm {
         const x = -230 + (460 * i) / (n - 1) + rand(this.rng, -8, 8);
         const sx = rand(this.rng, 16, 28);
         const sy = rand(this.rng, 9, 15);
-        mesh.position.set(x, row === 0 ? rand(this.rng, 14, 20) : rand(this.rng, 26, 36), row === 0 ? rand(this.rng, -4, 6) : rand(this.rng, 6, 18));
+        mesh.position.set(x, row === 0 ? rand(this.rng, 18, 24) : rand(this.rng, 28, 38), row === 0 ? rand(this.rng, -4, 6) : rand(this.rng, 6, 18));
         mesh.userData.baseY = mesh.position.y;
         mesh.scale.set(sx, sy, sx * 0.8);
         mesh.rotation.y = this.rng() * 6.28;
@@ -168,7 +171,14 @@ export class Storm {
       if (c === this.curtain) continue;
       c.position.y = (c.userData.baseY as number) + 0.5 * Math.sin(this.time * 0.4 + i);
     }
-    (this.curtain.material as THREE.MeshBasicMaterial).opacity = 0.35 + 0.35 * this.darkness;
+    const curtainMat = this.curtain.material as THREE.MeshBasicMaterial;
+    curtainMat.opacity = 0.35 + 0.35 * this.darkness;
+    // Up close the sun is gone: the unlit curtain must darken with the scene
+    // while the clouds keep a faint self-light so their facets stay readable.
+    const dk = this.darkness;
+    curtainMat.color.copy(this.curtainColor).multiplyScalar(1 - 0.65 * dk);
+    this.cloudMatDark.emissive.copy(this.cloudEmissiveDark).multiplyScalar(1 + 3.5 * dk);
+    this.cloudMatMid.emissive.copy(this.cloudEmissiveMid).multiplyScalar(1 + 3.5 * dk);
 
     // ----- rain
     if (this.intensity > 0.01) {
@@ -236,11 +246,14 @@ export class Storm {
 
   private triggerFlash(playerPos: THREE.Vector3, frontZ: number, dist: number, strength: number): void {
     this.flash = strength;
-    const x = playerPos.x + rand(this.rng, -45, 45);
     // In front of the cloud wall (its nearest faces reach ~frontZ-16) but never
     // closer than 20 m to the player.
     const z = Math.max(frontZ - rand(this.rng, 14, 24), playerPos.z + 20);
-    const top = playerPos.y + rand(this.rng, 26, 34);
+    const dz = z - playerPos.z;
+    // Close bolts stay inside the field of view (spread shrinks with proximity).
+    const x = playerPos.x + rand(this.rng, -1, 1) * Math.min(45, dz * 1.1);
+    // Top at ~16-22 degrees above the horizon: inside the wall, never above its tops.
+    const top = playerPos.y + 1.6 + dz * rand(this.rng, 0.28, 0.4);
     const pts: THREE.Vector3[] = [];
     const segs = 9;
     let cx = x;
@@ -253,11 +266,12 @@ export class Storm {
     }
     const curve = new THREE.CatmullRomCurve3(pts, false, 'catmullrom', 0);
     this.bolt.geometry.dispose();
-    this.bolt.geometry = new THREE.TubeGeometry(curve, segs * 2, 0.35, 4, false);
+    const radius = 0.08 + 0.004 * dz; // ~0.16 m at 20 m, ~0.25 m at 40 m
+    this.bolt.geometry = new THREE.TubeGeometry(curve, segs * 2, radius, 4, false);
     this.bolt.visible = true;
     this.boltTimer = rand(this.rng, 0.12, 0.2);
     const delay = clamp(dist / 95, 0.25, 3.5);
-    const volume = clamp(1 - Math.max(dist, 0) / 260, 0.12, 1) * (strength > 0.34 ? 1 : 0.5);
+    const volume = clamp(1 - Math.max(dist, 0) / 260, 0.12, 1);
     this.pendingThunder.push({ at: this.time + delay, volume });
   }
 

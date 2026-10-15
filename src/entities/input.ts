@@ -12,6 +12,10 @@ export interface KickRequest {
   dy: number;
   chip: boolean;
   tap: boolean;
+  /** Horizontal look movement that arrived after the release (undone when aiming). */
+  lookAfter: number;
+  /** Facing yaw at release, stamped by the player on the frame the request arrives. */
+  yaw?: number;
 }
 
 /**
@@ -29,12 +33,14 @@ export class Input {
   private lastClientX: number | null = null;
   private lastClientY: number | null = null;
   private readonly onKeyDown = (e: KeyboardEvent): void => {
+    // Track the physical key state always (also via auto-repeat events), so a
+    // key held across the menu/pause is picked up once input is enabled.
+    this.keys.add(e.code);
     if (!this.enabled) return;
     if (e.code === 'Tab' || e.code === 'Space' || e.code.startsWith('Arrow')) e.preventDefault();
     if (e.repeat) return;
-    this.keys.add(e.code);
-    if (e.code === 'KeyQ') this.kicks.push({ foot: 'left', dx: 0, dy: 0, chip: this.keys.has('Space'), tap: true });
-    if (e.code === 'KeyE') this.kicks.push({ foot: 'right', dx: 0, dy: 0, chip: this.keys.has('Space'), tap: true });
+    if (e.code === 'KeyQ') this.kicks.push({ foot: 'left', dx: 0, dy: 0, chip: this.keys.has('Space'), tap: true, lookAfter: 0 });
+    if (e.code === 'KeyE') this.kicks.push({ foot: 'right', dx: 0, dy: 0, chip: this.keys.has('Space'), tap: true, lookAfter: 0 });
   };
   private readonly onKeyUp = (e: KeyboardEvent): void => {
     this.keys.delete(e.code);
@@ -62,6 +68,8 @@ export class Input {
     } else {
       this.lookDX += mx;
       this.lookDY += my;
+      // Movement after a release belongs to the view, not to the kick's aim.
+      for (const k of this.kicks) if (k.yaw === undefined) k.lookAfter += mx;
     }
   };
   private readonly onMouseDown = (e: MouseEvent): void => {
@@ -108,7 +116,7 @@ export class Input {
     if (!this.drag) return;
     const d = this.drag;
     this.drag = null;
-    this.kicks.push({ foot: d.foot, dx: d.dx, dy: d.dy, chip: this.keys.has('Space'), tap: false });
+    this.kicks.push({ foot: d.foot, dx: d.dx, dy: d.dy, chip: this.keys.has('Space'), tap: false, lookAfter: 0 });
   }
 
   /** Cancel any pending drag and queued kick requests (pause, game over). */

@@ -45,7 +45,9 @@ export class Player {
   private walkPhase = 0;
   private bob = 0;
   private stepTimer = 0;
-  private dribbleCooldown = 0;
+  /** Intended walking velocity (before damping / collisions). */
+  private intentX = 0;
+  private intentZ = 0;
   private readonly fwd = new THREE.Vector3();
   private readonly rgt = new THREE.Vector3();
   private readonly tmp = new THREE.Vector3();
@@ -62,9 +64,9 @@ export class Player {
     this.head.position.set(0, CFG.player.eyeHeight, 0);
     this.head.add(this.camera);
     this.camera.position.set(0, 0, -0.08);
-    // The hips sit slightly behind the eyes; together with the forward lean of
-    // the standing pose this keeps the feet visible when looking down.
-    this.legs.group.position.set(0, 0, -0.06);
+    // The legs sit a little ahead of the eyes; together with the forward lean
+    // of the standing pose this keeps thighs and feet visible when looking down.
+    this.legs.group.position.set(0, 0, -0.12);
     this.rig.add(this.head, this.legs.group);
     this.rig.name = 'player';
   }
@@ -90,7 +92,8 @@ export class Player {
     this.kick = null;
     this.walkPhase = 0;
     this.bob = 0;
-    this.dribbleCooldown = 0;
+    this.intentX = 0;
+    this.intentZ = 0;
     this.applyTransform();
   }
 
@@ -141,6 +144,8 @@ export class Player {
     if (paused) {
       // Freeze: no sliding, no stamina regeneration while the world stands still.
       this.vel.set(0, 0, 0);
+      this.intentX = 0;
+      this.intentZ = 0;
     } else {
       if (wantSprint) this.stamina = Math.max(0, this.stamina - dt / CFG.player.staminaMax);
       else this.stamina = Math.min(1, this.stamina + (dt * CFG.player.staminaRegen) / CFG.player.staminaMax);
@@ -155,6 +160,8 @@ export class Player {
       const tl = Math.hypot(tx, tz) || 1;
       const targetVx = (tx / tl) * targetSpeed * (moving ? 1 : 0);
       const targetVz = (tz / tl) * targetSpeed * (moving ? 1 : 0);
+      this.intentX = targetVx;
+      this.intentZ = targetVz;
       const accel = moving ? CFG.player.accel : CFG.player.accel * 1.4;
       this.vel.x = damp(this.vel.x, targetVx, accel / 4, dt);
       this.vel.z = damp(this.vel.z, targetVz, accel / 4, dt);
@@ -227,7 +234,7 @@ export class Player {
     this.head.position.set(bobX, CFG.player.eyeHeight + bobY, 0);
 
     // ----- kick handling
-    if (!paused) this.processKicks();
+    if (!paused) this.processKicks(apple);
     if (this.kick) {
       const k = this.kick;
       // The swing freezes while paused and finishes after resuming.
@@ -247,12 +254,12 @@ export class Player {
     this.legs.update(dt, this.kick ? 26 : 14);
 
     // ----- body contact with the apple
-    if (!paused) this.dribble(apple, speed, dt);
+    if (!paused) this.dribble(apple, speed);
 
     this.applyTransform();
   }
 
-  private pushOutCircle(cx: number, cz: number, minDist: number): void {
+  private pushOutCircle(cx: number, cz: number, minDist: number, positionOnly = false): void {
     const dx = this.pos.x - cx;
     const dz = this.pos.z - cz;
     const d = Math.hypot(dx, dz);
@@ -264,6 +271,7 @@ export class Player {
     const push = (minDist - d) / d;
     this.pos.x += dx * push;
     this.pos.z += dz * push;
+    if (positionOnly) return;
     // Remove the velocity component into the obstacle.
     const vn = (this.vel.x * dx + this.vel.z * dz) / d;
     if (vn < 0) {
@@ -272,17 +280,25 @@ export class Player {
     }
   }
 
-  private processKicks(): void {
+  private processKicks(apple: Apple): void {
+    const reqs = this.input.kicks;
+    // Freeze the facing of every request on the frame it arrives (undoing the
+    // look movement that arrived after the release), even if it has to wait.
+    for (const r of reqs) {
+      if (r.yaw === undefined) r.yaw = this.yaw + r.lookAfter * CFG.player.lookSensitivity;
+    }
     // A request made during the wind-up waits until the foot has made contact;
     // after that a new request interrupts the follow-through.
     if (this.kick && !this.kick.done) return;
-    const reqs = this.input.kicks;
     if (reqs.length === 0) return;
     const req: KickRequest = reqs[reqs.length - 1];
     reqs.length = 0;
+    // A request queued behind a swing that just launched the apple can only
+    // whiff: drop it instead of showing a misleading miss.
+    if (this.kick && this.kick.done && apple.sinceKick < 0.35 && !this.appleInReach(apple, req.foot)) return;
     const { power, dirYaw } = Player.evalDrag(req.dx, req.dy, req.tap);
     // dirYaw is measured clockwise (to the right) from the facing direction.
-    this.kick = { foot: req.foot, t: 0, power, chip: req.chip, aimYaw: this.yaw - dirYaw, done: false };
+    this.kick = { foot: req.foot, t: 0, power, chip: req.chip, aimYaw: (req.yaw ?? this.yaw) - dirYaw, done: false };
   }
 
   /** True when the apple is in reach of the given foot. */
@@ -311,6 +327,8 @@ export class Player {
     if (k.chip) {
       elevation = CFG.kick.chipElevationDeg * DEG;
       speed *= CFG.kick.chipSpeedFactor;
+      // The instep scoops the apple up, so a chip from contact clears a log.
+      apple.pos.y += 0.25;
     }
     const dir = this.tmp2.set(dirX * Math.cos(elevation), Math.sin(elevation), dirZ * Math.cos(elevation)).normalize();
     const curl = (k.foot === 'left' ? 1 : -1) * CFG.kick.curl * k.power;
@@ -320,45 +338,67 @@ export class Player {
   }
 
   /**
-   * Body contact with the apple. The apple is a small solid obstacle for the
-   * body (the player is stopped, not the apple carried along) and gets a weak,
-   * rate-limited nudge, so the apple cannot be dribbled faster than the storm.
+   * Body contact with the apple. The apple is a small obstacle for the body:
+   * an apple rolling into the shins bounces off, and walking into a resting
+   * apple pushes it ahead at a capped speed (well below the storm), with the
+   * body following behind it.
    */
-  private dribble(apple: Apple, speed: number, dt: number): void {
-    this.dribbleCooldown -= dt;
+  private dribble(apple: Apple, speed: number): void {
     const dx = apple.pos.x - this.pos.x;
     const dz = apple.pos.z - this.pos.z;
     const d = Math.hypot(dx, dz);
     const minD = CFG.player.radius + apple.radius;
     if (d >= minD || apple.pos.y > this.pos.y + 1.0) return;
+    // Right after a kick the apple is in flight: hands off.
+    if (apple.sinceKick < 0.3 || !apple.onGround) return;
     let nx = d > 1e-4 ? dx / d : -Math.sin(this.yaw);
     let nz = d > 1e-4 ? dz / d : -Math.cos(this.yaw);
-    const along = this.vel.x * nx + this.vel.z * nz;
-    if (speed > 0.2) {
-      // Steer an off-centre contact towards the walking direction so the apple
-      // rolls ahead of the feet instead of squirting sideways.
-      const vx = this.vel.x / speed;
-      const vz = this.vel.z / speed;
-      const bx = nx * 0.45 + vx * 0.55;
-      const bz = nz * 0.45 + vz * 0.55;
+    // An apple rolling into the body bounces off the shins; the player is not moved.
+    const vrel = apple.vel.x * nx + apple.vel.z * nz;
+    if (vrel < -0.05) {
+      apple.vel.x -= nx * vrel * 1.3;
+      apple.vel.z -= nz * vrel * 1.3;
+      apple.pos.x = this.pos.x + nx * (minD + 0.01);
+      apple.pos.z = this.pos.z + nz * (minD + 0.01);
+      apple.resting = false;
+      return;
+    }
+    // Walking into the apple: steer an off-centre contact towards the walking
+    // direction so the apple rolls ahead of the feet instead of squirting sideways.
+    const intent = Math.hypot(this.intentX, this.intentZ);
+    if (intent > 0.2) {
+      const ix = this.intentX / intent;
+      const iz = this.intentZ / intent;
+      const bx = nx * 0.45 + ix * 0.55;
+      const bz = nz * 0.45 + iz * 0.55;
       const bl = Math.hypot(bx, bz) || 1;
       nx = bx / bl;
       nz = bz / bl;
     }
-    // Step back out of the apple.
-    this.pushOutCircle(apple.pos.x, apple.pos.z, minD);
-    if (this.dribbleCooldown > 0) return;
+    const along = this.intentX * nx + this.intentZ * nz;
+    // The body stays outside the apple (position only).
+    this.pushOutCircle(apple.pos.x, apple.pos.z, minD, true);
     if (along > 0.1 || (speed < 0.2 && apple.resting)) {
       const push = Math.min(along * 0.6 + 0.4, 1.8);
-      // Do not nudge the apple into a hard obstacle (log, root, stone, trunk).
-      const cx = apple.pos.x + nx * 0.12;
-      const cz = apple.pos.z + nz * 0.12;
-      let blocked = false;
-      this.world.colliders.forEachNear(cz, (col) => {
-        if (!blocked && !col.surface.soft && sphereContact(col, cx, apple.pos.y, cz, apple.radius, this.contact)) blocked = true;
-      });
-      if (!blocked) apple.nudge(nx * push, nz * push);
-      this.dribbleCooldown = 0.45;
+      const appleAlong = apple.vel.x * nx + apple.vel.z * nz;
+      if (appleAlong < push - 0.05) {
+        // Do not nudge the apple into a hard obstacle (log, root, stone, trunk).
+        const cx = apple.pos.x + nx * 0.12;
+        const cz = apple.pos.z + nz * 0.12;
+        let blocked = false;
+        this.world.colliders.forEachNear(cz, (col) => {
+          if (!blocked && !col.surface.soft && sphereContact(col, cx, apple.pos.y, cz, apple.radius, this.contact)) blocked = true;
+        });
+        if (!blocked) apple.nudge(nx * push, nz * push);
+      }
+      // The body follows at the apple's speed: remove only the velocity
+      // relative to the apple along the contact normal.
+      const appleN = apple.vel.x * nx + apple.vel.z * nz;
+      const bodyN = this.vel.x * nx + this.vel.z * nz;
+      if (bodyN > appleN) {
+        this.vel.x -= nx * (bodyN - appleN);
+        this.vel.z -= nz * (bodyN - appleN);
+      }
     }
   }
 

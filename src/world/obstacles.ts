@@ -76,7 +76,10 @@ export class Obstacles {
       const p = p0 + slot * (k + 0.15 + rng() * 0.7);
       // Keep obstacles off very steep bits of track.
       if (Math.abs(this.terrain.pathSlope(p)) > 0.3) continue;
-      const kind = this.pickKind(p, rng);
+      let kind = this.pickKind(p, rng);
+      // A log at the foot of a descent traps the apple (it rolls back into the
+      // log and cannot be chipped over from contact): use a root there.
+      if (kind === 'log' && this.terrain.pathSlope(p) < -0.08) kind = 'root';
       switch (kind) {
         case 'root': this.addRoot(group, i, p, rng); break;
         case 'branch': this.addBranch(group, i, p, rng); break;
