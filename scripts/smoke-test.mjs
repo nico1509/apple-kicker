@@ -1,0 +1,235 @@
+#!/usr/bin/env node
+/**
+ * Headless smoke test for Apple Kicker.
+ *
+ * Starts `vite preview` (unless GAME_URL is set), opens the game in headless
+ * Chromium, plays deterministically through the debug API (window.__appleKicker)
+ * and writes screenshots into ./screenshots. Fails on page errors or when the
+ * gameplay checks do not hold.
+ *
+ * Environment:
+ *   GAME_URL     use an already running server instead of starting vite preview
+ *   CHROME_PATH  path to a Chrome/Chromium binary (default: Playwright's bundled chromium)
+ *   QUALITY      low | medium | high (default low – software rendering is slow)
+ */
+import { spawn } from 'node:child_process';
+import fs from 'node:fs';
+import path from 'node:path';
+import { chromium } from 'playwright-core';
+
+const PORT = 4173;
+const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
+const shots = path.join(root, 'screenshots');
+fs.mkdirSync(shots, { recursive: true });
+const quality = process.env.QUALITY || 'low';
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+async function waitForServer(url, tries = 60) {
+  for (let i = 0; i < tries; i++) {
+    try {
+      const res = await fetch(url);
+      if (res.ok) return true;
+    } catch {
+      /* not up yet */
+    }
+    await sleep(250);
+  }
+  return false;
+}
+
+let server = null;
+let url = process.env.GAME_URL;
+if (!url) {
+  if (!fs.existsSync(path.join(root, 'dist', 'index.html'))) {
+    console.error('dist/ is missing – run `npm run build` first.');
+    process.exit(1);
+  }
+  server = spawn('npx', ['vite', 'preview', '--port', String(PORT), '--strictPort', '--host', '127.0.0.1'], {
+    cwd: root,
+    stdio: 'ignore',
+  });
+  url = `http://127.0.0.1:${PORT}/`;
+  if (!(await waitForServer(url))) {
+    console.error('vite preview did not start');
+    server.kill();
+    process.exit(1);
+  }
+}
+url += (url.includes('?') ? '&' : '?') + `quality=${quality}`;
+
+const browser = await chromium.launch({
+  executablePath: process.env.CHROME_PATH || undefined,
+  args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist', '--autoplay-policy=no-user-gesture-required'],
+});
+const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+const errors = [];
+page.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
+page.on('console', (msg) => {
+  if (msg.type() === 'error') errors.push(`console: ${msg.text()}`);
+});
+
+let failed = false;
+const check = (cond, msg) => {
+  if (!cond) {
+    failed = true;
+    console.error(`FAIL: ${msg}`);
+  } else console.log(`ok: ${msg}`);
+};
+const state = () => page.evaluate(() => window.__appleKicker.state());
+const simulate = (seconds, keys = []) => page.evaluate(([s, k]) => window.__appleKicker.simulate(s, k), [seconds, keys]);
+const kick = (dx, dy, foot, chip = false) => page.evaluate(([a, b, f, c]) => window.__appleKicker.kick(a, b, f, c), [dx, dy, foot, chip]);
+const look = (yaw, pitch) => page.evaluate(([y, p]) => window.__appleKicker.look(y, p), [yaw, pitch]);
+const shot = (name) => page.screenshot({ path: path.join(shots, name) });
+
+const wrap = (a) => ((a + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
+
+/**
+ * Turn towards the apple, walk up to it and kick it along the track
+ * (aimYaw = 0 is straight down the lane). Returns the states around the kick.
+ */
+async function walkAndKick(foot, powerPx, aimYaw = 0, chip = false, shotName = null) {
+  // Let the apple come to rest first (it may still be rolling from the last kick).
+  for (let i = 0; i < 6; i++) {
+    if ((await state()).appleResting) break;
+    await simulate(0.5);
+  }
+  const s = await state();
+  const ddx = s.applePx - s.playerX;
+  const ddz = s.applePz - s.playerZ;
+  const yaw = Math.atan2(-ddx, -ddz);
+  await look(yaw, -0.55);
+  const dist = Math.hypot(ddx, ddz);
+  // Sprint when it is far, walk the last bit.
+  if (dist > 6) await simulate((dist - 5) / 6.4, ['KeyW', 'ShiftLeft']);
+  const rest = Math.min(dist, 5);
+  const walkTime = Math.max(0, (rest - 1.05) / 4.2);
+  if (walkTime > 0) await simulate(walkTime, ['KeyW']);
+  // Aim at the track centre 12 m ahead of the apple (plus the requested offset).
+  const toPath = Math.atan2(-(s.pathAheadX - s.applePx), 12);
+  // Drag vector relative to the facing direction: up = ahead, right = right.
+  const a = wrap(toPath + aimYaw - yaw);
+  const dx = Math.sin(-a) * powerPx;
+  const dy = -Math.cos(a) * powerPx;
+  await kick(dx, dy, foot, chip);
+  await simulate(0.19);
+  if (shotName) {
+    await look(yaw, -1.0);
+    await simulate(0.02);
+    await shot(shotName);
+    await look(yaw, -0.55);
+  }
+  await simulate(0.2);
+  const during = await state();
+  await simulate(2.5);
+  const after = await state();
+  console.log(`  kick ${foot} ${powerPx}px: dist=${dist.toFixed(2)} launch=${during.appleSpeed.toFixed(1)} m/s, ${s.appleMax.toFixed(1)} → ${after.appleMax.toFixed(1)} m, storm ${after.stormDistance.toFixed(0)} m`);
+  return { before: s, during, after };
+}
+
+try {
+  await page.goto(url, { waitUntil: 'load' });
+  await page.waitForFunction(() => Boolean(window.__appleKicker), null, { timeout: 30000 });
+  await sleep(500);
+  await shot('01-menu.png');
+  const s0 = await state();
+  check(s0.state === 'menu', 'game boots into the menu');
+  check(s0.chunks >= 5, `initial chunks generated (${s0.chunks})`);
+
+  await page.evaluate(() => window.__appleKicker.start());
+  await sleep(100);
+  const s1 = await state();
+  check(s1.state === 'playing', 'game starts');
+
+  // Look down: legs and apple should be in view.
+  await look(0, -0.8);
+  await simulate(0.3);
+  await shot('02-start-legs.png');
+
+  await simulate(0.6, ['KeyW']);
+  const s2 = await state();
+  check(s2.playerZ < s1.playerZ - 1.5, `player walks forward (${s2.playerZ.toFixed(2)} m)`);
+
+  // Mouse deltas without pointer lock rotate the view.
+  await page.mouse.move(640, 360);
+  await page.mouse.move(700, 360, { steps: 3 });
+  await simulate(0.05);
+  const s2b = await state();
+  check(Math.abs(s2b.playerYaw - s2.playerYaw) > 0.05, `mouse movement turns the view (${(s2b.playerYaw - s2.playerYaw).toFixed(3)} rad)`);
+  await look(0, -0.55);
+
+  // First kick: right foot, straight, full power.
+  const k1 = await walkAndKick('right', 300, 0, false, '02b-kick-pose.png');
+  check(k1.during.appleSpeed > 5, `apple is flying after the kick (${k1.during.appleSpeed.toFixed(1)} m/s)`);
+  if (k1.during.appleSpeed <= 5) console.log('kick debug:', JSON.stringify(k1));
+  check(k1.after.appleMax > k1.before.appleMax + 10, `apple travelled far (${k1.before.appleMax.toFixed(1)} → ${k1.after.appleMax.toFixed(1)} m)`);
+  await shot('03-after-kick.png');
+
+  // Whiff: kicking with the apple far away must not launch it.
+  const sw = await state();
+  await look(sw.playerYaw + Math.PI, -0.4);
+  await kick(0, -200, 'left');
+  await simulate(0.35);
+  const sw2 = await state();
+  check(sw2.appleSpeed <= sw.appleSpeed + 0.5, `kicking without the apple in reach does nothing (${sw.appleSpeed.toFixed(2)} → ${sw2.appleSpeed.toFixed(2)} m/s)`);
+  await simulate(1.0);
+
+  // A few more kicks, alternating feet and a chip.
+  let last = sw2;
+  for (let i = 0; i < 6; i++) {
+    const r = await walkAndKick(i % 2 ? 'left' : 'right', 260, (i - 3) * 0.08, i === 3);
+    last = r.after;
+  }
+  await look((await state()).playerYaw, -0.3);
+  await simulate(0.1);
+  await shot('04-later.png');
+  check(last.appleMax > 60, `apple progressed over several kicks (${last.appleMax.toFixed(1)} m)`);
+  check(last.chunks >= Math.floor(last.appleMax / 32) + 4, `chunks stream in ahead of the player (${last.chunks})`);
+  check(last.stormDistance > 0 && last.state === 'playing', `storm has not caught up yet (${last.stormDistance.toFixed(1)} m)`);
+
+  // Obstacles further down the track.
+  await page.evaluate(() => window.__appleKicker.teleport(420));
+  await look(0, -0.35);
+  await simulate(0.5);
+  await shot('05-obstacles.png');
+  const r2 = await walkAndKick('right', 320, 0);
+  check(r2.after.appleMax > 420, `apple still moves in the obstacle zone (${r2.after.appleMax.toFixed(1)} m)`);
+
+  // Storm catches up → game over.
+  await simulate(70);
+  const s3 = await state();
+  await shot('06-storm.png');
+  check(s3.state === 'over', `storm ends the run (state=${s3.state}, dist=${s3.stormDistance.toFixed(1)})`);
+
+  // Restart works.
+  await page.evaluate(() => window.__appleKicker.start());
+  await simulate(0.2);
+  const s4 = await state();
+  check(s4.state === 'playing' && s4.appleMax < 1, 'restart creates a fresh run');
+
+  // Frame rate estimate (software rendering, so only a rough sanity figure).
+  const fps = await page.evaluate(
+    () =>
+      new Promise((resolve) => {
+        let frames = 0;
+        const t0 = performance.now();
+        const tick = () => {
+          frames++;
+          if (performance.now() - t0 < 1500) requestAnimationFrame(tick);
+          else resolve((frames * 1000) / (performance.now() - t0));
+        };
+        requestAnimationFrame(tick);
+      }),
+  );
+  console.log(`approx. fps (software rendering, quality=${quality}): ${fps.toFixed(1)}`);
+  console.log('final state:', JSON.stringify(await state()));
+} catch (e) {
+  failed = true;
+  console.error('test crashed:', e);
+}
+
+check(errors.length === 0, `no page errors${errors.length ? `: \n${errors.join('\n')}` : ''}`);
+await browser.close();
+if (server) server.kill();
+console.log(failed ? 'SMOKE TEST FAILED' : 'SMOKE TEST PASSED');
+process.exit(failed ? 1 : 0);

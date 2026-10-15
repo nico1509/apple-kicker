@@ -1,0 +1,565 @@
+import * as THREE from 'three';
+import { CFG } from '../config';
+import { clamp, lerp, smoothstep } from '../utils/math';
+import { fbm1, fbm2, hash3, mulberry32, noise1, subSeed, valueNoise2 } from '../utils/noise';
+
+/**
+ * Coordinate conventions
+ * ----------------------
+ * Y is up. The path runs towards negative Z. "Progress" p = -z is the distance
+ * travelled along the path. The lateral offset d = x - pathCenterX(p) is
+ * positive on the right-hand side when facing down the path.
+ */
+
+export type BiomeType = 'forest' | 'meadow' | 'field' | 'vineyard' | 'hedge';
+export type Side = -1 | 1;
+
+export interface BiomeMix {
+  a: BiomeType;
+  b: BiomeType;
+  t: number; // 0 → a, 1 → b
+}
+
+interface Hill {
+  start: number;
+  length: number;
+  height: number;
+  kind: 'bump' | 'up' | 'down';
+}
+
+const BIOME_SEGMENT = 100;
+const HILL_SEGMENT = 50;
+const BIOME_WEIGHTS: Array<[BiomeType, number]> = [
+  ['forest', 0.3],
+  ['meadow', 0.24],
+  ['hedge', 0.2],
+  ['field', 0.14],
+  ['vineyard', 0.12],
+];
+
+export class Terrain {
+  readonly seed: number;
+  private readonly phase: number[];
+  private readonly hillCache = new Map<number, Hill[]>();
+  private readonly stepOffsetCache = new Map<number, number>();
+  private readonly biomeCache = new Map<string, BiomeType>();
+
+  constructor(seed: number) {
+    this.seed = seed >>> 0;
+    const rng = mulberry32(subSeed(this.seed, 1));
+    this.phase = [rng() * 6.28, rng() * 6.28, rng() * 6.28];
+  }
+
+  // ---------------------------------------------------------------------------
+  // Path centre line
+
+  pathCenterX(p: number): number {
+    const s = this.seed;
+    const x =
+      5.5 * Math.sin(p * 0.019 + this.phase[0]) +
+      3.2 * Math.sin(p * 0.043 + this.phase[1]) +
+      2.4 * fbm1(p * 0.02 + 50, s + 3, 2) +
+      1.2 * Math.sin(p * 0.11 + this.phase[2]);
+    // Ease in so that the player spawns on a straight piece of path.
+    const ease = smoothstep(0, 30, p);
+    return clamp(x * ease, -CFG.path.maxWander, CFG.path.maxWander);
+  }
+
+  /** Direction of the path (yaw in radians, 0 = straight towards -Z, positive = curving left). */
+  pathHeading(p: number): number {
+    const dx = this.pathCenterX(p + 1) - this.pathCenterX(p - 1);
+    return Math.atan2(-dx, 2);
+  }
+
+  /** Convert a world position into path coordinates. */
+  toPath(x: number, z: number): { p: number; d: number } {
+    const p = -z;
+    return { p, d: x - this.pathCenterX(p) };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Hills (the "Hügel" obstacles)
+
+  private hillsInSegment(i: number): Hill[] {
+    let list = this.hillCache.get(i);
+    if (list) return list;
+    list = [];
+    const p0 = i * HILL_SEGMENT;
+    const rng = mulberry32(subSeed(this.seed, 7000 + i));
+    const prob = p0 < 110 ? 0 : Math.min(0.7, 0.28 + p0 / 1600);
+    if (rng() < prob) {
+      const difficulty = Math.min(1.7, 0.7 + p0 / 700);
+      const r = rng();
+      const kind: Hill['kind'] = r < 0.55 ? 'bump' : r < 0.8 ? 'up' : 'down';
+      const height = Math.min(4, (1.0 + rng() * 1.8) * difficulty * (kind === 'bump' ? 1 : 0.7));
+      // Keep the slope climbable (and rollable) by tying the length to the height.
+      const length = Math.max(14 + rng() * 14, height * (kind === 'bump' ? 7.5 : 4.5));
+      list.push({ start: p0 + rng() * 10, length, height, kind });
+    }
+    this.hillCache.set(i, list);
+    return list;
+  }
+
+  /** Sum of all completed step hills before segment i. */
+  private stepOffsetBefore(i: number): number {
+    if (i <= 0) return 0;
+    const cached = this.stepOffsetCache.get(i);
+    if (cached !== undefined) return cached;
+    let off = this.stepOffsetBefore(i - 1);
+    for (const h of this.hillsInSegment(i - 1)) {
+      if (h.kind === 'up') off += h.height;
+      else if (h.kind === 'down') off -= h.height;
+    }
+    this.stepOffsetCache.set(i, off);
+    return off;
+  }
+
+  private hillHeight(p: number): number {
+    const i = Math.floor(p / HILL_SEGMENT);
+    let h = this.stepOffsetBefore(i);
+    for (let k = i - 1; k <= i; k++) {
+      if (k < 0) continue;
+      for (const hill of this.hillsInSegment(k)) {
+        const u = (p - hill.start) / hill.length;
+        if (hill.kind === 'bump') {
+          if (u > 0 && u < 1) h += hill.height * (0.5 - 0.5 * Math.cos(u * Math.PI * 2));
+        } else {
+          const s = smoothstep(0, 1, u);
+          const contribution = hill.kind === 'up' ? hill.height * s : -hill.height * s;
+          // Hills of earlier segments that are fully completed are already in the prefix sum.
+          if (k === i) h += contribution;
+          else if (u < 1) h += contribution - (hill.kind === 'up' ? hill.height : -hill.height);
+        }
+      }
+    }
+    return h;
+  }
+
+  /** Height of the path centre line. */
+  pathHeight(p: number): number {
+    const s = this.seed;
+    const rolling = 2.1 * fbm1(p * 0.011 + 7, s + 11, 3) + 0.45 * fbm1(p * 0.047 + 3, s + 13, 2);
+    return rolling * smoothstep(0, 25, p) + this.hillHeight(p);
+  }
+
+  /** Average slope of the path over the next few metres (used for difficulty hints). */
+  pathSlope(p: number): number {
+    return (this.pathHeight(p + 2) - this.pathHeight(p - 2)) / 4;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Biomes
+
+  biomeAt(p: number, side: Side): BiomeType {
+    const k = Math.max(0, Math.floor(p / BIOME_SEGMENT));
+    return this.biomeOfSegment(k, side);
+  }
+
+  private biomeOfSegment(k: number, side: Side): BiomeType {
+    const key = `${k}:${side}`;
+    const cached = this.biomeCache.get(key);
+    if (cached) return cached;
+    let biome: BiomeType;
+    if (k === 0) biome = side < 0 ? 'meadow' : 'hedge';
+    else if (k === 1) biome = side < 0 ? 'forest' : 'meadow';
+    else {
+      const rng = mulberry32(subSeed(this.seed, 9000 + k, side + 2));
+      const prev = this.biomeOfSegment(k - 1, side);
+      // The left side is decided first; the right side tries not to copy it.
+      const other = side === 1 ? this.biomeOfSegment(k, -1) : null;
+      biome = prev;
+      for (let attempt = 0; attempt < 4 && (biome === prev || (biome === other && rng() < 0.5)); attempt++) {
+        let r = rng();
+        biome = 'meadow';
+        for (const [b, w] of BIOME_WEIGHTS) {
+          if (r < w) {
+            biome = b;
+            break;
+          }
+          r -= w;
+        }
+      }
+    }
+    this.biomeCache.set(key, biome);
+    return biome;
+  }
+
+  biomeMix(p: number, side: Side): BiomeMix {
+    const k = Math.max(0, Math.floor(p / BIOME_SEGMENT));
+    const edge = k * BIOME_SEGMENT;
+    const t = k === 0 ? 1 : smoothstep(edge - 9, edge + 9, p);
+    return { a: this.biomeOfSegment(Math.max(0, k - 1), side), b: this.biomeOfSegment(k, side), t };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Height field
+
+  private sideSlope(p: number, side: Side): number {
+    const base = 0.11 * noise1(p * 0.012 + side * 31, this.seed + 17 + side * 3);
+    const mix = this.biomeMix(p, side);
+    const bias = (b: BiomeType): number =>
+      b === 'vineyard' ? 0.17 : b === 'hedge' ? 0.08 : b === 'field' ? -0.02 : b === 'forest' ? 0.05 : 0;
+    return clamp(base + lerp(bias(mix.a), bias(mix.b), mix.t), -0.2, 0.22);
+  }
+
+  /** Cross-section of the track: two shallow wheel ruts, a crown and raised verges. */
+  private crossSection(d: number): number {
+    const ad = Math.abs(d);
+    const rut = -0.045 * Math.exp(-(((ad - CFG.path.rutCenter) / 0.24) ** 2));
+    const crown = ad < CFG.path.halfWidth ? 0.035 * (1 - (ad / CFG.path.halfWidth) ** 2) : 0;
+    const verge = 0.1 * smoothstep(CFG.path.halfWidth, 2.8, ad);
+    return rut + crown + verge;
+  }
+
+  groundHeight(x: number, z: number): number {
+    const p = -z;
+    const d = x - this.pathCenterX(p);
+    const ad = Math.abs(d);
+    const side: Side = d < 0 ? -1 : 1;
+    const s = this.seed;
+    let h = this.pathHeight(p) + this.crossSection(d);
+    const dd = Math.max(0, ad - CFG.path.halfWidth);
+    h += this.sideSlope(p, side) * Math.min(dd, 45);
+    h += 0.9 * fbm2(x * 0.07, z * 0.07, s + 21, 3) * smoothstep(1.7, 6, ad);
+    h += 6 * fbm2(x * 0.012 + 3, z * 0.012, s + 23, 3) * smoothstep(9, 40, ad);
+    const ax = Math.abs(x);
+    if (ax > CFG.chunk.halfWidth) {
+      // Distant wooded hills rising towards the horizon.
+      const far = ax - CFG.chunk.halfWidth;
+      h += far * 0.11 + 9 * fbm2(x * 0.006, z * 0.006 + 9, s + 29, 3) * smoothstep(0, 60, far);
+    }
+    return h;
+  }
+
+  groundNormal(x: number, z: number, out: THREE.Vector3): THREE.Vector3 {
+    const e = 0.12;
+    const hx = this.groundHeight(x + e, z) - this.groundHeight(x - e, z);
+    const hz = this.groundHeight(x, z + e) - this.groundHeight(x, z - e);
+    return out.set(-hx, 2 * e, -hz).normalize();
+  }
+
+  // ---------------------------------------------------------------------------
+  // Surface types (rolling resistance for the apple)
+
+  /** Rolling resistance in m/s² for the ground at this position (ignoring puddles). */
+  rollingResistance(x: number, z: number): number {
+    const { p, d } = this.toPath(x, z);
+    const ad = Math.abs(d);
+    if (ad < CFG.path.halfWidth) {
+      const rut = Math.exp(-(((ad - CFG.path.rutCenter) / 0.3) ** 2));
+      return lerp(1.5, 0.75, rut);
+    }
+    const mix = this.biomeMix(p, d < 0 ? -1 : 1);
+    const res = (b: BiomeType): number =>
+      b === 'field' ? 3.6 : b === 'forest' ? 1.9 : b === 'hedge' ? 2.2 : b === 'vineyard' ? 2.0 : 1.9;
+    return lerp(res(mix.a), res(mix.b), mix.t);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Colours
+
+  private static readonly PAL = {
+    dirt: new THREE.Color(0x9a7a52),
+    dirtDark: new THREE.Color(0x7a5c3c),
+    pathGrass: new THREE.Color(0x8da24a),
+    verge: new THREE.Color(0x6f9a3c),
+    meadow: new THREE.Color(0x7aa83f),
+    meadowDark: new THREE.Color(0x5f8f34),
+    straw: new THREE.Color(0xc3b270),
+    strawPale: new THREE.Color(0xd6c98e),
+    litter: new THREE.Color(0x7a5a3b),
+    litterDark: new THREE.Color(0x5e4530),
+    forestGrass: new THREE.Color(0x56823a),
+    soil: new THREE.Color(0x6b4d35),
+    soilLight: new THREE.Color(0x8c6c4c),
+    vineGrass: new THREE.Color(0x8aa64a),
+    vineSoil: new THREE.Color(0x7e6243),
+    farForest: new THREE.Color(0x3f6a33),
+    farForestDark: new THREE.Color(0x2f5329),
+    farMeadow: new THREE.Color(0x7ba04a),
+  };
+
+  private readonly tmpA = new THREE.Color();
+  private readonly tmpB = new THREE.Color();
+
+  private biomeColor(b: BiomeType, p: number, d: number, x: number, z: number, out: THREE.Color): THREE.Color {
+    const P = Terrain.PAL;
+    const ad = Math.abs(d);
+    const s = this.seed;
+    const n = fbm2(x * 0.05, z * 0.05, s + 41, 3);
+    switch (b) {
+      case 'meadow': {
+        const patch = smoothstep(-0.15, 0.45, n + 0.25 * Math.sin(p * 0.35 + d * 0.1));
+        out.copy(P.meadow).lerp(P.straw, patch * 0.8);
+        if (ad > 20) out.lerp(P.strawPale, smoothstep(20, 40, ad) * 0.3);
+        return out;
+      }
+      case 'forest': {
+        const litter = smoothstep(1.8, 4.5, ad) * smoothstep(-0.4, 0.3, n + 0.3);
+        out.copy(P.forestGrass).lerp(P.litter, litter);
+        out.lerp(P.litterDark, smoothstep(0.1, 0.6, valueNoise2(x * 0.2, z * 0.2, s + 43)) * 0.5 * litter);
+        return out;
+      }
+      case 'hedge': {
+        if (ad < 5.5) {
+          out.copy(P.verge).lerp(P.litterDark, smoothstep(1.9, 3.2, ad) * (1 - smoothstep(4.5, 5.5, ad)));
+          return out;
+        }
+        const patch = smoothstep(-0.2, 0.4, n);
+        return out.copy(P.meadow).lerp(P.straw, patch * 0.6);
+      }
+      case 'field': {
+        if (ad < 2.6 || ad > 34) {
+          const patch = smoothstep(-0.2, 0.4, n);
+          return out.copy(P.meadow).lerp(P.straw, patch * 0.5);
+        }
+        // Furrows run across the field at a slight angle.
+        const furrow = 0.5 + 0.5 * Math.sin((d * 0.9 + p * 0.15) * 3.1);
+        out.copy(P.soil).lerp(P.soilLight, furrow * 0.7 + 0.2 * n);
+        out.lerp(P.straw, smoothstep(0.3, 0.7, valueNoise2(x * 0.3, z * 0.3, s + 47)) * 0.25);
+        return out;
+      }
+      case 'vineyard': {
+        if (ad < 2.8 || ad > 27) {
+          return out.copy(P.meadow).lerp(P.straw, smoothstep(-0.2, 0.4, n) * 0.5);
+        }
+        const rowPhase = ((p % 2.4) + 2.4) % 2.4;
+        const underVine = 1 - smoothstep(0.25, 0.55, Math.abs(rowPhase - 1.2));
+        return out.copy(P.vineGrass).lerp(P.vineSoil, underVine * 0.5);
+      }
+    }
+  }
+
+  /** Ground colour (linear RGB) at a world position. */
+  groundColor(x: number, z: number, out: THREE.Color): THREE.Color {
+    const P = Terrain.PAL;
+    const p = -z;
+    const d = x - this.pathCenterX(p);
+    const ad = Math.abs(d);
+    const ax = Math.abs(x);
+    const s = this.seed;
+
+    if (ax > CFG.chunk.halfWidth - 2) {
+      const far = ax - CFG.chunk.halfWidth;
+      const n = fbm2(x * 0.01, z * 0.01, s + 51, 3);
+      out.copy(P.farForest).lerp(P.farForestDark, smoothstep(-0.3, 0.4, valueNoise2(x * 0.03, z * 0.03, s + 53)));
+      out.lerp(P.farMeadow, smoothstep(0.15, 0.45, n) * (1 - smoothstep(60, 140, far)));
+      // Blend into the detailed terrain colour.
+      if (far < 0) {
+        const inner = this.groundColorInner(p, d, x, z, this.tmpB);
+        out.lerp(inner, smoothstep(0, -2, far));
+      }
+    } else {
+      this.groundColorInner(p, d, x, z, out);
+    }
+
+    // Leaf-litter freckles on the track in autumn.
+    if (ad < 2.4 && hash3(Math.floor(x * 2), Math.floor(z * 2), s + 61) > 0.9) {
+      out.lerp(this.tmpA.setHex(0xb07a3a), 0.3);
+    }
+    return out;
+  }
+
+  private groundColorInner(p: number, d: number, x: number, z: number, out: THREE.Color): THREE.Color {
+    const P = Terrain.PAL;
+    const ad = Math.abs(d);
+    const s = this.seed;
+    if (ad < CFG.path.halfWidth + 0.35) {
+      const rut = Math.exp(-(((ad - CFG.path.rutCenter) / 0.3) ** 2));
+      const dirtVar = smoothstep(-0.4, 0.5, valueNoise2(x * 0.5, z * 0.5, s + 31));
+      this.tmpA.copy(P.dirt).lerp(P.dirtDark, dirtVar * 0.6);
+      out.copy(P.pathGrass).lerp(this.tmpA, smoothstep(0.25, 0.75, rut));
+      // The track fades into the verge.
+      out.lerp(P.verge, smoothstep(CFG.path.halfWidth - 0.3, CFG.path.halfWidth + 0.35, ad));
+      return out;
+    }
+    const side: Side = d < 0 ? -1 : 1;
+    const mix = this.biomeMix(p, side);
+    this.biomeColor(mix.b, p, d, x, z, out);
+    if (mix.t < 1) {
+      this.biomeColor(mix.a, p, d, x, z, this.tmpA);
+      out.lerp(this.tmpA, 1 - mix.t);
+    }
+    // Verge grass fades into the biome colour.
+    out.lerp(P.verge, 1 - smoothstep(CFG.path.halfWidth + 0.2, 2.6, ad));
+    return out;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Chunk geometry
+
+  /** Z range covered by chunk index i (p from i*L to (i+1)*L). */
+  static chunkRange(i: number): { zNear: number; zFar: number; p0: number; p1: number } {
+    const L = CFG.chunk.length;
+    return { zNear: -i * L, zFar: -(i + 1) * L, p0: i * L, p1: (i + 1) * L };
+  }
+
+  private columns(): number[] {
+    const cols: number[] = [];
+    const { halfWidth, fineHalfWidth, fineStep, coarseStep } = CFG.chunk;
+    for (let x = -halfWidth; x < -fineHalfWidth - 1e-6; x += coarseStep) cols.push(x);
+    for (let x = -fineHalfWidth; x < fineHalfWidth - 1e-6; x += fineStep) cols.push(x);
+    for (let x = fineHalfWidth; x <= halfWidth + 1e-6; x += coarseStep) cols.push(x);
+    return cols;
+  }
+
+  /** Builds the detailed, flat-shaded ground geometry for a chunk. */
+  buildChunkGeometry(i: number): THREE.BufferGeometry {
+    const { zNear, zFar } = Terrain.chunkRange(i);
+    const cols = this.columns();
+    const rows: number[] = [];
+    for (let z = zNear; z >= zFar - 1e-6; z -= CFG.chunk.fineStep) rows.push(z);
+    return this.buildGrid(cols, rows, 2000 + i);
+  }
+
+  /** Builds the coarse backdrop strips on both sides of a chunk. */
+  buildFarGeometry(i: number): THREE.BufferGeometry {
+    const { zNear, zFar } = Terrain.chunkRange(i);
+    const { halfWidth, farExtent, farStep } = CFG.chunk;
+    const rows: number[] = [];
+    for (let z = zNear; z >= zFar - 1e-6; z -= farStep) rows.push(z);
+    const left: number[] = [];
+    const right: number[] = [];
+    for (let x = halfWidth - 1.5; x <= farExtent; x += farStep) {
+      right.push(x);
+      left.unshift(-x);
+    }
+    const a = this.buildGrid(left, rows, 3000 + i, -0.35);
+    const b = this.buildGrid(right, rows, 4000 + i, -0.35);
+    return mergeNonIndexed([a, b]);
+  }
+
+  private buildGrid(cols: number[], rows: number[], salt: number, yOffset = 0): THREE.BufferGeometry {
+    const nc = cols.length;
+    const nr = rows.length;
+    const heights = new Float32Array(nc * nr);
+    // Colours are computed per grid vertex (smooth across the ruts and verges);
+    // each face then gets its own brightness for the faceted look.
+    const vcol = new Float32Array(nc * nr * 3);
+    const color = new THREE.Color();
+    for (let r = 0; r < nr; r++) {
+      for (let c = 0; c < nc; c++) {
+        const idx = r * nc + c;
+        heights[idx] = this.groundHeight(cols[c], rows[r]) + yOffset;
+        this.groundColor(cols[c], rows[r], color);
+        vcol[idx * 3] = color.r;
+        vcol[idx * 3 + 1] = color.g;
+        vcol[idx * 3 + 2] = color.b;
+      }
+    }
+    const quadCount = (nc - 1) * (nr - 1);
+    const vertCount = quadCount * 6;
+    const positions = new Float32Array(vertCount * 3);
+    const normals = new Float32Array(vertCount * 3);
+    const colors = new Float32Array(vertCount * 3);
+    const pA = new THREE.Vector3();
+    const pB = new THREE.Vector3();
+    const pC = new THREE.Vector3();
+    const ab = new THREE.Vector3();
+    const ac = new THREE.Vector3();
+    const n = new THREE.Vector3();
+    let v = 0;
+    const emit = (a: THREE.Vector3, b: THREE.Vector3, c: THREE.Vector3, ia: number, ib: number, ic: number, facet: number): void => {
+      ab.subVectors(b, a);
+      ac.subVectors(c, a);
+      n.crossVectors(ab, ac).normalize();
+      if (n.y < 0) n.negate();
+      const bright = 0.92 + 0.16 * facet;
+      const verts = [a, b, c];
+      const idx = [ia, ib, ic];
+      for (let k = 0; k < 3; k++) {
+        const q = verts[k];
+        const ci = idx[k] * 3;
+        positions[v * 3] = q.x;
+        positions[v * 3 + 1] = q.y;
+        positions[v * 3 + 2] = q.z;
+        normals[v * 3] = n.x;
+        normals[v * 3 + 1] = n.y;
+        normals[v * 3 + 2] = n.z;
+        colors[v * 3] = vcol[ci] * bright;
+        colors[v * 3 + 1] = vcol[ci + 1] * bright;
+        colors[v * 3 + 2] = vcol[ci + 2] * bright;
+        v++;
+      }
+    };
+    for (let r = 0; r < nr - 1; r++) {
+      for (let c = 0; c < nc - 1; c++) {
+        const h00 = heights[r * nc + c];
+        const h10 = heights[r * nc + c + 1];
+        const h01 = heights[(r + 1) * nc + c];
+        const h11 = heights[(r + 1) * nc + c + 1];
+        const x0 = cols[c];
+        const x1 = cols[c + 1];
+        const z0 = rows[r];
+        const z1 = rows[r + 1];
+        const flip = hash3(c, r, this.seed + salt) > 0.5;
+        const f1 = hash3(c * 2, r, this.seed + salt + 7);
+        const f2 = hash3(c * 2 + 1, r, this.seed + salt + 7);
+        const i00 = r * nc + c;
+        const i10 = i00 + 1;
+        const i01 = i00 + nc;
+        const i11 = i01 + 1;
+        if (flip) {
+          // Diagonal from (x0,z0) to (x1,z1). Winding is fixed afterwards.
+          pA.set(x0, h00, z0); pB.set(x0, h01, z1); pC.set(x1, h11, z1);
+          emit(pA, pB, pC, i00, i01, i11, f1);
+          pA.set(x0, h00, z0); pB.set(x1, h11, z1); pC.set(x1, h10, z0);
+          emit(pA, pB, pC, i00, i11, i10, f2);
+        } else {
+          pA.set(x0, h00, z0); pB.set(x0, h01, z1); pC.set(x1, h10, z0);
+          emit(pA, pB, pC, i00, i01, i10, f1);
+          pA.set(x1, h10, z0); pB.set(x0, h01, z1); pC.set(x1, h11, z1);
+          emit(pA, pB, pC, i10, i01, i11, f2);
+        }
+      }
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geo.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
+    geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    fixWinding(geo);
+    geo.computeBoundingSphere();
+    return geo;
+  }
+}
+
+/** Ensure every triangle is wound counter-clockwise when seen from above (front face up). */
+function fixWinding(geo: THREE.BufferGeometry): void {
+  const pos = geo.getAttribute('position') as THREE.BufferAttribute;
+  const arr = pos.array as Float32Array;
+  for (let i = 0; i < pos.count; i += 3) {
+    const ax = arr[i * 3], az = arr[i * 3 + 2];
+    const bx = arr[(i + 1) * 3], bz = arr[(i + 1) * 3 + 2];
+    const cx = arr[(i + 2) * 3], cz = arr[(i + 2) * 3 + 2];
+    // Signed area in the XZ plane; the Y-up normal of (b-a)x(c-a) has y = (bz-az)*(cx-ax) - (bx-ax)*(cz-az)... use that.
+    const ny = (bz - az) * (cx - ax) - (bx - ax) * (cz - az);
+    if (ny < 0) {
+      // swap vertices b and c
+      for (let k = 0; k < 3; k++) {
+        const t = arr[(i + 1) * 3 + k];
+        arr[(i + 1) * 3 + k] = arr[(i + 2) * 3 + k];
+        arr[(i + 2) * 3 + k] = t;
+      }
+    }
+  }
+}
+
+function mergeNonIndexed(list: THREE.BufferGeometry[]): THREE.BufferGeometry {
+  const names = ['position', 'normal', 'color'];
+  const out = new THREE.BufferGeometry();
+  for (const name of names) {
+    let total = 0;
+    for (const g of list) total += (g.getAttribute(name) as THREE.BufferAttribute).count;
+    const arr = new Float32Array(total * 3);
+    let off = 0;
+    for (const g of list) {
+      const a = g.getAttribute(name) as THREE.BufferAttribute;
+      arr.set(a.array as Float32Array, off);
+      off += a.array.length;
+    }
+    out.setAttribute(name, new THREE.BufferAttribute(arr, 3));
+  }
+  for (const g of list) g.dispose();
+  out.computeBoundingSphere();
+  return out;
+}
