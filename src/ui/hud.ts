@@ -18,12 +18,21 @@ export class Hud {
   private readonly crosshair: HTMLElement;
   private readonly indicator: HTMLElement;
   private readonly indicatorLabel: HTMLElement;
+  private readonly chevron: HTMLElement;
   private readonly overlay: HTMLElement;
   private readonly overlayContent: HTMLElement;
   private readonly vignette: HTMLElement;
   private readonly hint: HTMLElement;
   private messageTimer: number | null = null;
   private startHandler: (() => void) | null = null;
+  private restartHandler: (() => void) | null = null;
+  /** The game-over panel ignores clicks for a moment so the score can be read. */
+  private armedAt = 0;
+  private lastDistance = '';
+  private lastBest = '';
+  private lastStorm = '';
+  private lastIndicatorVisible = false;
+  private lastArrowVisible = false;
   overlayKind: OverlayKind = null;
 
   constructor(root: HTMLElement) {
@@ -38,7 +47,6 @@ export class Hud {
           <div class="bar"><div class="fill" data-storm-bar></div></div>
         </div>
       </div>
-      <div class="stamina"><div class="fill" data-stamina></div></div>
       <div class="crosshair"></div>
       <div class="kick-arrow" hidden>
         <div class="line"></div>
@@ -46,10 +54,13 @@ export class Hud {
       </div>
       <div class="apple-indicator" hidden><span class="chevron">➤</span><span class="ind-label"></span></div>
       <div class="message" hidden></div>
-      <div class="hint">
-        <span><b>WASD</b> laufen</span><span><b>Shift</b> sprinten</span>
-        <span><b>Linke Maus</b> linker Fuß</span><span><b>Rechte Maus</b> rechter Fuß</span>
-        <span><b>Ziehen</b> = Richtung &amp; Kraft</span><span><b>Leertaste</b> halten = Lupfer</span>
+      <div class="bottom-stack">
+        <div class="stamina"><div class="fill" data-stamina></div></div>
+        <div class="hint">
+          <span><b>WASD</b> laufen</span><span><b>Shift</b> sprinten</span>
+          <span><b>Linke Maus</b> linker Fuß</span><span><b>Rechte Maus</b> rechter Fuß</span>
+          <span><b>Ziehen</b> = Richtung &amp; Kraft</span><span><b>Leertaste</b> halten = Lupfer</span>
+        </div>
       </div>
       <div class="overlay" hidden><div class="overlay-content"></div></div>
     `;
@@ -71,15 +82,20 @@ export class Hud {
     this.crosshair = q('.crosshair');
     this.indicator = q('.apple-indicator');
     this.indicatorLabel = q('.apple-indicator .ind-label');
+    this.chevron = q('.apple-indicator .chevron');
     this.overlay = q('.overlay');
     this.overlayContent = q('.overlay-content');
     this.vignette = q('.vignette');
     this.hint = q('.hint');
     this.overlay.addEventListener('click', (e) => {
+      if (this.overlayKind === null) return;
       const target = e.target as HTMLElement;
-      if (target.closest('[data-action="start"]') || this.overlayKind !== null) {
-        if (this.overlayKind === 'start' || this.overlayKind === 'paused' || this.overlayKind === 'gameover') this.startHandler?.();
+      if (target.closest('[data-action="restart"]')) {
+        this.restartHandler?.();
+        return;
       }
+      if (this.overlayKind === 'gameover' && performance.now() < this.armedAt) return;
+      this.startHandler?.();
     });
   }
 
@@ -87,14 +103,30 @@ export class Hud {
     this.startHandler = cb;
   }
 
+  onRestart(cb: () => void): void {
+    this.restartHandler = cb;
+  }
+
   setDistance(m: number, best: number): void {
-    this.distanceEl.textContent = `${Math.floor(m)} m`;
-    this.bestEl.textContent = best > 0 ? `Rekord ${Math.floor(best)} m` : '';
+    const txt = `${Math.floor(m)} m`;
+    if (txt !== this.lastDistance) {
+      this.lastDistance = txt;
+      this.distanceEl.textContent = txt;
+    }
+    const bestTxt = best > 0 ? `Rekord ${Math.floor(best)} m` : '';
+    if (bestTxt !== this.lastBest) {
+      this.lastBest = bestTxt;
+      this.bestEl.textContent = bestTxt;
+    }
   }
 
   setStorm(dist: number, danger: number): void {
     const d = Math.max(0, dist);
-    this.stormEl.textContent = `${Math.round(d)} m hinter dir`;
+    const txt = window.innerWidth < 480 ? `${Math.round(d)} m` : `${Math.round(d)} m hinter dir`;
+    if (txt !== this.lastStorm) {
+      this.lastStorm = txt;
+      this.stormEl.textContent = txt;
+    }
     this.stormBar.style.width = `${Math.round(danger * 100)}%`;
     this.stormWrap.classList.toggle('danger', danger > 0.6);
     this.stormWrap.classList.toggle('critical', danger > 0.85);
@@ -110,7 +142,11 @@ export class Hud {
   }
 
   setDrag(dx: number, dy: number, power: number, foot: Foot, chip: boolean, tap: boolean): void {
-    this.arrow.hidden = false;
+    if (!this.lastArrowVisible) {
+      this.lastArrowVisible = true;
+      this.arrow.hidden = false;
+      this.crosshair.classList.add('aiming');
+    }
     const len = Math.hypot(dx, dy);
     const angle = Math.atan2(dy, dx);
     this.arrowLine.style.width = `${Math.min(len, 340)}px`;
@@ -119,10 +155,11 @@ export class Hud {
     this.arrowLine.style.background = `linear-gradient(90deg, rgba(255,255,255,0.35), hsl(${hue} 90% 55%))`;
     const footName = foot === 'left' ? 'Linker Fuß' : 'Rechter Fuß';
     this.arrowLabel.textContent = tap ? `${footName} · Stupser` : `${footName} · ${Math.round(power * 100)} %${chip ? ' · Lupfer' : ''}`;
-    this.crosshair.classList.add('aiming');
   }
 
   clearDrag(): void {
+    if (!this.lastArrowVisible) return;
+    this.lastArrowVisible = false;
     this.arrow.hidden = true;
     this.crosshair.classList.remove('aiming');
   }
@@ -144,12 +181,14 @@ export class Hud {
 
   /** Off-screen indicator pointing to the apple. */
   setAppleIndicator(visible: boolean, x: number, y: number, angle: number, distance: number): void {
-    this.indicator.hidden = !visible;
+    if (visible !== this.lastIndicatorVisible) {
+      this.lastIndicatorVisible = visible;
+      this.indicator.hidden = !visible;
+    }
     if (!visible) return;
     this.indicator.style.left = `${x}px`;
     this.indicator.style.top = `${y}px`;
-    const chevron = this.indicator.querySelector<HTMLElement>('.chevron');
-    if (chevron) chevron.style.transform = `rotate(${angle}rad)`;
+    this.chevron.style.transform = `rotate(${angle}rad)`;
     this.indicatorLabel.textContent = `Apfel ${Math.round(distance)} m`;
   }
 
@@ -158,9 +197,9 @@ export class Hud {
     this.overlay.hidden = false;
     this.overlayContent.innerHTML = `
       <h1>Apple <span>Kicker</span></h1>
-      <p class="tagline">Goldener Oktober, ein Apfel, ein Waldweg – und ein Gewitter im Nacken.</p>
+      <p class="tagline">Goldener Oktober, ein Apfel, ein Feldweg – und ein Gewitter im Nacken.</p>
       <div class="rules">
-        <p>Kicke deinen Apfel so weit wie möglich den Weg entlang. Zähler sind die Meter, die der <b>Apfel</b> zurücklegt.</p>
+        <p>Kicke deinen Apfel so weit wie möglich den Weg entlang. Gezählt werden die Meter, die der <b>Apfel</b> zurücklegt.</p>
         <p>Von hinten zieht eine Schlechtwetterfront heran. Holt sie dich ein, ist der Lauf vorbei.</p>
         <p>Wurzeln, Äste, Steine, Pfützen und Hügel werden mit der Zeit mehr – kick fester oder lupf drüber.</p>
       </div>
@@ -174,7 +213,7 @@ export class Hud {
       </div>
       ${best > 0 ? `<p class="best-line">Dein Rekord: <b>${Math.floor(best)} m</b></p>` : ''}
       <button class="start" data-action="start">Klicken zum Starten</button>
-      <p class="small">Der Mauszeiger wird im Spiel eingefangen · <kbd>Esc</kbd> pausiert</p>
+      <p class="small">Der Mauszeiger wird im Spiel eingefangen · <kbd>Esc</kbd> oder <kbd>P</kbd> pausiert</p>
     `;
   }
 
@@ -185,12 +224,15 @@ export class Hud {
       <h2>Pause</h2>
       <p>Der Apfel wartet. Das Gewitter auch.</p>
       <button class="start" data-action="start">Weiter</button>
+      <button class="start secondary" data-action="restart">Neustart</button>
+      <p class="small"><kbd>Enter</kbd> / <kbd>P</kbd> = weiter · <kbd>R</kbd> = Neustart</p>
     `;
   }
 
   showGameOver(score: number, best: number, isRecord: boolean): void {
     this.overlayKind = 'gameover';
     this.overlay.hidden = false;
+    this.armedAt = performance.now() + 700;
     this.overlayContent.innerHTML = `
       <h2>Vom Gewitter eingeholt!</h2>
       <p class="score">Dein Apfel kam <b>${Math.floor(score)} m</b> weit.</p>

@@ -12,8 +12,13 @@ interface Chunk {
   obstacles: THREE.Group;
 }
 
+/** Time budget per frame for incremental chunk generation. */
+const BUILD_BUDGET_MS = 4;
+
 /**
  * The world owns the terrain functions, the chunk life-cycle and the collider store.
+ * Chunks are generated incrementally (a few milliseconds per frame) so that
+ * walking never stutters; the start area is generated synchronously.
  */
 export class World {
   readonly terrain: Terrain;
@@ -24,6 +29,7 @@ export class World {
   private readonly chunks = new Map<number, Chunk>();
   private readonly groundMat = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true });
   private readonly farMat = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true });
+  private pending: { i: number; gen: Generator<void, void> } | null = null;
   /** Highest chunk index ever generated (for stats). */
   generated = 0;
 
@@ -34,20 +40,36 @@ export class World {
     this.group.name = 'world';
   }
 
-  private buildChunk(i: number): void {
-    if (this.chunks.has(i) || i < 0) return;
-    const ground = new THREE.Mesh(this.terrain.buildChunkGeometry(i), this.groundMat);
+  private static lowestChunk(): number {
+    return -CFG.chunk.behind;
+  }
+
+  /** Generator that builds chunk i in several steps (ground rows, far strips, decor, obstacles). */
+  private *buildChunkGen(i: number): Generator<void, void> {
+    if (this.chunks.has(i) || i < World.lowestChunk()) return;
+    const groundGeo = yield* this.terrain.buildChunkGeometryGen(i);
+    const ground = new THREE.Mesh(groundGeo, this.groundMat);
     ground.receiveShadow = true;
     ground.castShadow = false;
     ground.name = `ground-${i}`;
+    yield;
     const far = new THREE.Mesh(this.terrain.buildFarGeometry(i), this.farMat);
     far.receiveShadow = false;
     far.name = `far-${i}`;
+    yield;
     const decor = this.decor.buildChunk(i);
+    yield;
     const obstacles = this.obstacles.buildChunk(i);
     this.group.add(ground, far, decor, obstacles);
     this.chunks.set(i, { ground, far, decor, obstacles });
     this.generated = Math.max(this.generated, i);
+  }
+
+  private buildChunkNow(i: number): void {
+    const gen = this.buildChunkGen(i);
+    while (!gen.next().done) {
+      /* run to completion */
+    }
   }
 
   private removeChunk(i: number): void {
@@ -62,26 +84,45 @@ export class World {
     this.chunks.delete(i);
   }
 
-  /** Build every chunk around z synchronously (used at game start). */
-  prewarm(z: number): void {
+  private window(z: number): { lo: number; hi: number } {
     const i = Math.floor(-z / CFG.chunk.length);
-    for (let k = Math.max(0, i - CFG.chunk.behind); k <= i + CFG.chunk.ahead; k++) this.buildChunk(k);
+    return { lo: Math.max(World.lowestChunk(), i - CFG.chunk.behind), hi: i + CFG.chunk.ahead };
   }
 
-  /** Keep the chunk window around z up to date. Builds at most one chunk per call. */
+  /** Build every chunk around z synchronously (used at game start and for teleports). */
+  prewarm(z: number): void {
+    this.pending = null;
+    const { lo, hi } = this.window(z);
+    for (let k = lo; k <= hi; k++) this.buildChunkNow(k);
+  }
+
+  /** Keep the chunk window around z up to date, spending at most a few ms per call. */
   update(z: number): void {
-    const i = Math.floor(-z / CFG.chunk.length);
-    const lo = Math.max(0, i - CFG.chunk.behind);
-    const hi = i + CFG.chunk.ahead;
+    const { lo, hi } = this.window(z);
     for (const k of [...this.chunks.keys()]) {
       if (k < lo - 1 || k > hi + 1) this.removeChunk(k);
     }
-    for (let k = lo; k <= hi; k++) {
-      if (!this.chunks.has(k)) {
-        this.buildChunk(k);
-        break;
+    if (this.pending && (this.pending.i < lo - 1 || this.pending.i > hi + 1)) this.pending = null;
+    const deadline = performance.now() + BUILD_BUDGET_MS;
+    while (performance.now() < deadline) {
+      if (!this.pending) {
+        let next = -1;
+        for (let k = lo; k <= hi; k++) {
+          if (!this.chunks.has(k)) {
+            next = k;
+            break;
+          }
+        }
+        if (next < 0) return;
+        this.pending = { i: next, gen: this.buildChunkGen(next) };
       }
+      if (this.pending.gen.next().done) this.pending = null;
     }
+  }
+
+  /** True while a chunk is still being generated in the background. */
+  get busy(): boolean {
+    return this.pending !== null;
   }
 
   groundHeight(x: number, z: number): number {
@@ -98,6 +139,7 @@ export class World {
   }
 
   dispose(): void {
+    this.pending = null;
     for (const k of [...this.chunks.keys()]) this.removeChunk(k);
     this.decor.dispose();
     this.obstacles.dispose();

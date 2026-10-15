@@ -29,6 +29,10 @@ interface Hill {
 
 const BIOME_SEGMENT = 100;
 const HILL_SEGMENT = 50;
+/** Extra cross slope (m per m) that a biome adds beside the lane. */
+const SLOPE_BIAS: Record<BiomeType, number> = { vineyard: 0.17, hedge: 0.08, field: -0.02, forest: 0.05, meadow: 0 };
+/** Rolling resistance (m/s²) of the ground beside the lane. */
+const ROLL_RES: Record<BiomeType, number> = { field: 3.6, forest: 1.9, hedge: 2.2, vineyard: 2.0, meadow: 1.9 };
 const BIOME_WEIGHTS: Array<[BiomeType, number]> = [
   ['forest', 0.3],
   ['meadow', 0.24],
@@ -42,7 +46,8 @@ export class Terrain {
   private readonly phase: number[];
   private readonly hillCache = new Map<number, Hill[]>();
   private readonly stepOffsetCache = new Map<number, number>();
-  private readonly biomeCache = new Map<string, BiomeType>();
+  private readonly biomeCache = new Map<number, BiomeType>();
+  private readonly mixScratch: BiomeMix = { a: 'meadow', b: 'meadow', t: 1 };
 
   constructor(seed: number) {
     this.seed = seed >>> 0;
@@ -156,7 +161,7 @@ export class Terrain {
   }
 
   private biomeOfSegment(k: number, side: Side): BiomeType {
-    const key = `${k}:${side}`;
+    const key = k * 2 + (side > 0 ? 1 : 0);
     const cached = this.biomeCache.get(key);
     if (cached) return cached;
     let biome: BiomeType;
@@ -184,11 +189,28 @@ export class Terrain {
     return biome;
   }
 
-  biomeMix(p: number, side: Side): BiomeMix {
+  /**
+   * Biomes blend symmetrically over ±W metres around every segment edge so that
+   * heights, colours and rolling resistance are continuous. Returns a scratch
+   * object unless `out` is given: do not keep the result across calls.
+   */
+  biomeMix(p: number, side: Side, out: BiomeMix = this.mixScratch): BiomeMix {
+    const W = 9;
     const k = Math.max(0, Math.floor(p / BIOME_SEGMENT));
-    const edge = k * BIOME_SEGMENT;
-    const t = k === 0 ? 1 : smoothstep(edge - 9, edge + 9, p);
-    return { a: this.biomeOfSegment(Math.max(0, k - 1), side), b: this.biomeOfSegment(k, side), t };
+    const local = p - k * BIOME_SEGMENT;
+    if (k > 0 && local < W) {
+      out.a = this.biomeOfSegment(k - 1, side);
+      out.b = this.biomeOfSegment(k, side);
+      out.t = smoothstep(-W, W, local);
+    } else if (local > BIOME_SEGMENT - W) {
+      out.a = this.biomeOfSegment(k, side);
+      out.b = this.biomeOfSegment(k + 1, side);
+      out.t = smoothstep(-W, W, local - BIOME_SEGMENT);
+    } else {
+      out.a = out.b = this.biomeOfSegment(k, side);
+      out.t = 1;
+    }
+    return out;
   }
 
   // ---------------------------------------------------------------------------
@@ -197,9 +219,7 @@ export class Terrain {
   private sideSlope(p: number, side: Side): number {
     const base = 0.11 * noise1(p * 0.012 + side * 31, this.seed + 17 + side * 3);
     const mix = this.biomeMix(p, side);
-    const bias = (b: BiomeType): number =>
-      b === 'vineyard' ? 0.17 : b === 'hedge' ? 0.08 : b === 'field' ? -0.02 : b === 'forest' ? 0.05 : 0;
-    return clamp(base + lerp(bias(mix.a), bias(mix.b), mix.t), -0.2, 0.22);
+    return clamp(base + lerp(SLOPE_BIAS[mix.a], SLOPE_BIAS[mix.b], mix.t), -0.2, 0.22);
   }
 
   /** Cross-section of the track: two shallow wheel ruts, a crown and raised verges. */
@@ -213,13 +233,23 @@ export class Terrain {
 
   groundHeight(x: number, z: number): number {
     const p = -z;
-    const d = x - this.pathCenterX(p);
-    const ad = Math.abs(d);
+    const cx = this.pathCenterX(p);
+    const d = x - cx;
     const side: Side = d < 0 ? -1 : 1;
+    return this.groundHeightRow(x, z, cx, this.pathHeight(p), this.sideSlope(p, side));
+  }
+
+  /**
+   * Height with the row-constant terms (path centre, path height, side slope)
+   * supplied by the caller. Chunk building evaluates them once per row.
+   */
+  groundHeightRow(x: number, z: number, cx: number, pathH: number, slope: number): number {
+    const d = x - cx;
+    const ad = Math.abs(d);
     const s = this.seed;
-    let h = this.pathHeight(p) + this.crossSection(d);
+    let h = pathH + this.crossSection(d);
     const dd = Math.max(0, ad - CFG.path.halfWidth);
-    h += this.sideSlope(p, side) * Math.min(dd, 45);
+    h += slope * Math.min(dd, 45);
     h += 0.9 * fbm2(x * 0.07, z * 0.07, s + 21, 3) * smoothstep(1.7, 6, ad);
     h += 6 * fbm2(x * 0.012 + 3, z * 0.012, s + 23, 3) * smoothstep(9, 40, ad);
     const ax = Math.abs(x);
@@ -250,9 +280,7 @@ export class Terrain {
       return lerp(1.5, 0.75, rut);
     }
     const mix = this.biomeMix(p, d < 0 ? -1 : 1);
-    const res = (b: BiomeType): number =>
-      b === 'field' ? 3.6 : b === 'forest' ? 1.9 : b === 'hedge' ? 2.2 : b === 'vineyard' ? 2.0 : 1.9;
-    return lerp(res(mix.a), res(mix.b), mix.t);
+    return lerp(ROLL_RES[mix.a], ROLL_RES[mix.b], mix.t);
   }
 
   // ---------------------------------------------------------------------------
@@ -332,9 +360,20 @@ export class Terrain {
 
   /** Ground colour (linear RGB) at a world position. */
   groundColor(x: number, z: number, out: THREE.Color): THREE.Color {
+    const p = -z;
+    const cx = this.pathCenterX(p);
+    const d = x - cx;
+    const mix = this.biomeMix(p, d < 0 ? -1 : 1, this.mixColor);
+    return this.groundColorRow(x, z, cx, mix, out);
+  }
+
+  private readonly mixColor: BiomeMix = { a: 'meadow', b: 'meadow', t: 1 };
+
+  /** Ground colour with the row-constant path centre and biome mix supplied by the caller. */
+  groundColorRow(x: number, z: number, cx: number, mix: BiomeMix, out: THREE.Color): THREE.Color {
     const P = Terrain.PAL;
     const p = -z;
-    const d = x - this.pathCenterX(p);
+    const d = x - cx;
     const ad = Math.abs(d);
     const ax = Math.abs(x);
     const s = this.seed;
@@ -346,11 +385,11 @@ export class Terrain {
       out.lerp(P.farMeadow, smoothstep(0.15, 0.45, n) * (1 - smoothstep(60, 140, far)));
       // Blend into the detailed terrain colour.
       if (far < 0) {
-        const inner = this.groundColorInner(p, d, x, z, this.tmpB);
+        const inner = this.groundColorInner(p, d, x, z, mix, this.tmpB);
         out.lerp(inner, smoothstep(0, -2, far));
       }
     } else {
-      this.groundColorInner(p, d, x, z, out);
+      this.groundColorInner(p, d, x, z, mix, out);
     }
 
     // Leaf-litter freckles on the track in autumn.
@@ -360,7 +399,7 @@ export class Terrain {
     return out;
   }
 
-  private groundColorInner(p: number, d: number, x: number, z: number, out: THREE.Color): THREE.Color {
+  private groundColorInner(p: number, d: number, x: number, z: number, mix: BiomeMix, out: THREE.Color): THREE.Color {
     const P = Terrain.PAL;
     const ad = Math.abs(d);
     const s = this.seed;
@@ -373,8 +412,6 @@ export class Terrain {
       out.lerp(P.verge, smoothstep(CFG.path.halfWidth - 0.3, CFG.path.halfWidth + 0.35, ad));
       return out;
     }
-    const side: Side = d < 0 ? -1 : 1;
-    const mix = this.biomeMix(p, side);
     this.biomeColor(mix.b, p, d, x, z, out);
     if (mix.t < 1) {
       this.biomeColor(mix.a, p, d, x, z, this.tmpA);
@@ -403,13 +440,22 @@ export class Terrain {
     return cols;
   }
 
-  /** Builds the detailed, flat-shaded ground geometry for a chunk. */
+  /** Builds the detailed, flat-shaded ground geometry for a chunk (synchronously). */
   buildChunkGeometry(i: number): THREE.BufferGeometry {
+    const gen = this.buildChunkGeometryGen(i);
+    for (;;) {
+      const r = gen.next();
+      if (r.done) return r.value;
+    }
+  }
+
+  /** Same as buildChunkGeometry but as a generator that yields every few rows. */
+  *buildChunkGeometryGen(i: number): Generator<void, THREE.BufferGeometry> {
     const { zNear, zFar } = Terrain.chunkRange(i);
     const cols = this.columns();
     const rows: number[] = [];
     for (let z = zNear; z >= zFar - 1e-6; z -= CFG.chunk.fineStep) rows.push(z);
-    return this.buildGrid(cols, rows, 2000 + i);
+    return yield* this.buildGridGen(cols, rows, 2000 + i, 0, 6);
   }
 
   /** Builds the coarse backdrop strips on both sides of a chunk. */
@@ -430,28 +476,49 @@ export class Terrain {
   }
 
   private buildGrid(cols: number[], rows: number[], salt: number, yOffset = 0): THREE.BufferGeometry {
+    const gen = this.buildGridGen(cols, rows, salt, yOffset, Infinity);
+    for (;;) {
+      const r = gen.next();
+      if (r.done) return r.value;
+    }
+  }
+
+  /**
+   * Grid builder. Heights are sampled per grid vertex; colours are sampled per
+   * face at the triangle centroid so that the narrow wheel ruts stay crisp.
+   * Row-constant terms (path centre, path height, side slopes, biome mix) are
+   * evaluated once per row. Yields after every `rowsPerStep` rows.
+   */
+  private *buildGridGen(cols: number[], rows: number[], salt: number, yOffset: number, rowsPerStep: number): Generator<void, THREE.BufferGeometry> {
     const nc = cols.length;
     const nr = rows.length;
     const heights = new Float32Array(nc * nr);
-    // Colours are computed per grid vertex (smooth across the ruts and verges);
-    // each face then gets its own brightness for the faceted look.
-    const vcol = new Float32Array(nc * nr * 3);
-    const color = new THREE.Color();
+    const rowCx = new Float32Array(nr);
+    const mixL: BiomeMix[] = [];
+    const mixR: BiomeMix[] = [];
     for (let r = 0; r < nr; r++) {
+      const z = rows[r];
+      const p = -z;
+      const cx = this.pathCenterX(p);
+      const ph = this.pathHeight(p);
+      const slopeL = this.sideSlope(p, -1);
+      const slopeR = this.sideSlope(p, 1);
+      rowCx[r] = cx;
+      mixL.push(this.biomeMix(p, -1, { a: 'meadow', b: 'meadow', t: 1 }));
+      mixR.push(this.biomeMix(p, 1, { a: 'meadow', b: 'meadow', t: 1 }));
       for (let c = 0; c < nc; c++) {
-        const idx = r * nc + c;
-        heights[idx] = this.groundHeight(cols[c], rows[r]) + yOffset;
-        this.groundColor(cols[c], rows[r], color);
-        vcol[idx * 3] = color.r;
-        vcol[idx * 3 + 1] = color.g;
-        vcol[idx * 3 + 2] = color.b;
+        const x = cols[c];
+        const side: Side = x < cx ? -1 : 1;
+        heights[r * nc + c] = this.groundHeightRow(x, z, cx, ph, side < 0 ? slopeL : slopeR) + yOffset;
       }
+      if ((r + 1) % rowsPerStep === 0) yield;
     }
     const quadCount = (nc - 1) * (nr - 1);
     const vertCount = quadCount * 6;
     const positions = new Float32Array(vertCount * 3);
     const normals = new Float32Array(vertCount * 3);
     const colors = new Float32Array(vertCount * 3);
+    const color = new THREE.Color();
     const pA = new THREE.Vector3();
     const pB = new THREE.Vector3();
     const pC = new THREE.Vector3();
@@ -459,30 +526,32 @@ export class Terrain {
     const ac = new THREE.Vector3();
     const n = new THREE.Vector3();
     let v = 0;
-    const emit = (a: THREE.Vector3, b: THREE.Vector3, c: THREE.Vector3, ia: number, ib: number, ic: number, facet: number): void => {
+    let rowIndex = 0;
+    const emit = (a: THREE.Vector3, b: THREE.Vector3, c: THREE.Vector3, facet: number): void => {
       ab.subVectors(b, a);
       ac.subVectors(c, a);
       n.crossVectors(ab, ac).normalize();
       if (n.y < 0) n.negate();
-      const bright = 0.92 + 0.16 * facet;
-      const verts = [a, b, c];
-      const idx = [ia, ib, ic];
-      for (let k = 0; k < 3; k++) {
-        const q = verts[k];
-        const ci = idx[k] * 3;
-        positions[v * 3] = q.x;
-        positions[v * 3 + 1] = q.y;
-        positions[v * 3 + 2] = q.z;
-        normals[v * 3] = n.x;
-        normals[v * 3 + 1] = n.y;
-        normals[v * 3 + 2] = n.z;
-        colors[v * 3] = vcol[ci] * bright;
-        colors[v * 3 + 1] = vcol[ci + 1] * bright;
-        colors[v * 3 + 2] = vcol[ci + 2] * bright;
-        v++;
+      const cxF = (a.x + b.x + c.x) / 3;
+      const czF = (a.z + b.z + c.z) / 3;
+      const cx = rowCx[rowIndex];
+      this.groundColorRow(cxF, czF, cx, cxF < cx ? mixL[rowIndex] : mixR[rowIndex], color);
+      const bright = 0.97 + 0.06 * facet;
+      const cr = color.r * bright;
+      const cg = color.g * bright;
+      const cb = color.b * bright;
+      const o = v * 3;
+      positions[o] = a.x; positions[o + 1] = a.y; positions[o + 2] = a.z;
+      positions[o + 3] = b.x; positions[o + 4] = b.y; positions[o + 5] = b.z;
+      positions[o + 6] = c.x; positions[o + 7] = c.y; positions[o + 8] = c.z;
+      for (let k = 0; k < 9; k += 3) {
+        normals[o + k] = n.x; normals[o + k + 1] = n.y; normals[o + k + 2] = n.z;
+        colors[o + k] = cr; colors[o + k + 1] = cg; colors[o + k + 2] = cb;
       }
+      v += 3;
     };
     for (let r = 0; r < nr - 1; r++) {
+      rowIndex = r;
       for (let c = 0; c < nc - 1; c++) {
         const h00 = heights[r * nc + c];
         const h10 = heights[r * nc + c + 1];
@@ -495,23 +564,21 @@ export class Terrain {
         const flip = hash3(c, r, this.seed + salt) > 0.5;
         const f1 = hash3(c * 2, r, this.seed + salt + 7);
         const f2 = hash3(c * 2 + 1, r, this.seed + salt + 7);
-        const i00 = r * nc + c;
-        const i10 = i00 + 1;
-        const i01 = i00 + nc;
-        const i11 = i01 + 1;
+        // Triangles are emitted counter-clockwise seen from above (x grows to the
+        // right, z shrinks towards the far row).
         if (flip) {
-          // Diagonal from (x0,z0) to (x1,z1). Winding is fixed afterwards.
-          pA.set(x0, h00, z0); pB.set(x0, h01, z1); pC.set(x1, h11, z1);
-          emit(pA, pB, pC, i00, i01, i11, f1);
-          pA.set(x0, h00, z0); pB.set(x1, h11, z1); pC.set(x1, h10, z0);
-          emit(pA, pB, pC, i00, i11, i10, f2);
+          pA.set(x0, h00, z0); pB.set(x1, h11, z1); pC.set(x0, h01, z1);
+          emit(pA, pB, pC, f1);
+          pA.set(x0, h00, z0); pB.set(x1, h10, z0); pC.set(x1, h11, z1);
+          emit(pA, pB, pC, f2);
         } else {
-          pA.set(x0, h00, z0); pB.set(x0, h01, z1); pC.set(x1, h10, z0);
-          emit(pA, pB, pC, i00, i01, i10, f1);
-          pA.set(x1, h10, z0); pB.set(x0, h01, z1); pC.set(x1, h11, z1);
-          emit(pA, pB, pC, i10, i01, i11, f2);
+          pA.set(x0, h00, z0); pB.set(x1, h10, z0); pC.set(x0, h01, z1);
+          emit(pA, pB, pC, f1);
+          pA.set(x1, h10, z0); pB.set(x1, h11, z1); pC.set(x0, h01, z1);
+          emit(pA, pB, pC, f2);
         }
       }
+      if ((r + 1) % rowsPerStep === 0) yield;
     }
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
@@ -523,7 +590,10 @@ export class Terrain {
   }
 }
 
-/** Ensure every triangle is wound counter-clockwise when seen from above (front face up). */
+/**
+ * Safety net: ensure every triangle is wound counter-clockwise when seen from
+ * above (front face up). Colours are per face, so only positions need swapping.
+ */
 function fixWinding(geo: THREE.BufferGeometry): void {
   const pos = geo.getAttribute('position') as THREE.BufferAttribute;
   const arr = pos.array as Float32Array;
@@ -531,10 +601,9 @@ function fixWinding(geo: THREE.BufferGeometry): void {
     const ax = arr[i * 3], az = arr[i * 3 + 2];
     const bx = arr[(i + 1) * 3], bz = arr[(i + 1) * 3 + 2];
     const cx = arr[(i + 2) * 3], cz = arr[(i + 2) * 3 + 2];
-    // Signed area in the XZ plane; the Y-up normal of (b-a)x(c-a) has y = (bz-az)*(cx-ax) - (bx-ax)*(cz-az)... use that.
+    // Y component of (b-a) x (c-a).
     const ny = (bz - az) * (cx - ax) - (bx - ax) * (cz - az);
     if (ny < 0) {
-      // swap vertices b and c
       for (let k = 0; k < 3; k++) {
         const t = arr[(i + 1) * 3 + k];
         arr[(i + 1) * 3 + k] = arr[(i + 2) * 3 + k];

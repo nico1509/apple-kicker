@@ -19,10 +19,6 @@ export type Rng = () => number;
 
 /** Uniform float in [lo, hi). */
 export const rand = (rng: Rng, lo: number, hi: number): number => lo + (hi - lo) * rng();
-/** Integer in [lo, hi]. */
-export const randInt = (rng: Rng, lo: number, hi: number): number => lo + Math.floor(rng() * (hi - lo + 1));
-/** Pick from a list. */
-export const pick = <T>(rng: Rng, list: readonly T[]): T => list[Math.floor(rng() * list.length)];
 
 /** Hash three integers to a float in [0, 1). */
 export function hash3(x: number, y: number, seed: number): number {

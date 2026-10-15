@@ -5,7 +5,7 @@ import { Apple } from './entities/apple';
 import { Input } from './entities/input';
 import { Player, type PlayerEvents } from './entities/player';
 import { Hud } from './ui/hud';
-import { clamp, lerp } from './utils/math';
+import { clamp, lerp, smoothstep } from './utils/math';
 import { Storm } from './weather/storm';
 import { Sky } from './world/sky';
 import { World } from './world/world';
@@ -13,10 +13,10 @@ import { World } from './world/world';
 export type GameState = 'menu' | 'playing' | 'paused' | 'over';
 export type Quality = 'low' | 'medium' | 'high';
 
-/** Quality from the URL (?quality=low) or localStorage, defaulting to high. */
+/** Quality from the URL (?quality=low|medium|high), defaulting to high. */
 export function detectQuality(): Quality {
   try {
-    const q = new URLSearchParams(window.location.search).get('quality') ?? localStorage.getItem('apple-kicker-quality');
+    const q = new URLSearchParams(window.location.search).get('quality');
     if (q === 'low' || q === 'medium' || q === 'high') return q;
   } catch {
     /* ignore */
@@ -25,11 +25,16 @@ export function detectQuality(): Quality {
 }
 
 const BEST_KEY = 'apple-kicker-best';
+const HINT_SECONDS = 25;
 const SUN_DIR = new THREE.Vector3(0.55, 0.62, -0.5).normalize();
 const HORIZON_CLEAR = new THREE.Color(0xd3e4f3);
 const HORIZON_STORM = new THREE.Color(0x5f666f);
 const TOP_CLEAR = new THREE.Color(0x4f8fd6);
 const TOP_STORM = new THREE.Color(0x2e3540);
+const HEMI_SKY_CLEAR = new THREE.Color(0xcfe3ff);
+const HEMI_SKY_STORM = new THREE.Color(0x6f7782);
+const HEMI_GROUND_CLEAR = new THREE.Color(0x6b6a3a);
+const HEMI_GROUND_STORM = new THREE.Color(0x3a3d38);
 
 /**
  * Owns the renderer, the scene and all systems and runs the game loop.
@@ -43,8 +48,8 @@ export class Game {
   readonly sky: Sky;
   readonly storm: Storm;
   world: World;
-  player: Player;
-  apple: Apple;
+  player!: Player;
+  apple!: Apple;
   state: GameState = 'menu';
   elapsed = 0;
   best = 0;
@@ -58,9 +63,11 @@ export class Game {
   /** When true the animation loop only renders; time advances via simulate(). */
   manualStepping = false;
   private readonly tmp = new THREE.Vector3();
+  private readonly tmp2 = new THREE.Vector3();
   private tipObstacles = false;
   private tipStorm = false;
   private tipWhiff = false;
+  private hintFaded = false;
   private pointerLockWanted = false;
   private readonly rafLoop = (now: number): void => this.frame(now);
 
@@ -75,13 +82,13 @@ export class Game {
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.05;
     this.renderer.shadowMap.enabled = quality !== 'low';
-    this.renderer.shadowMap.type = quality === 'high' ? THREE.PCFSoftShadowMap : THREE.PCFShadowMap;
+    this.renderer.shadowMap.type = THREE.PCFShadowMap;
 
     this.fog = new THREE.Fog(HORIZON_CLEAR.clone(), CFG.render.fogNear, CFG.render.fogFar);
     this.scene.fog = this.fog;
     this.scene.background = null;
 
-    this.hemi = new THREE.HemisphereLight(0xcfe3ff, 0x6b6a3a, 1.15);
+    this.hemi = new THREE.HemisphereLight(HEMI_SKY_CLEAR, HEMI_GROUND_CLEAR, 1.15);
     this.scene.add(this.hemi);
     this.sun = new THREE.DirectionalLight(0xfff1d6, 2.9);
     this.sun.castShadow = true;
@@ -93,24 +100,16 @@ export class Game {
     this.sun.shadow.mapSize.set(shadowSize, shadowSize);
     this.sun.shadow.bias = -0.0005;
     this.sun.shadow.normalBias = 0.06;
+    this.sun.shadow.radius = quality === 'high' ? 3 : 1.5;
     this.scene.add(this.sun, this.sun.target);
 
     this.sky = new Sky(this.scene, SUN_DIR);
     this.input = new Input(canvas);
     this.hud = new Hud(uiRoot);
     this.storm = new Storm(this.scene, {
-      onThunder: (v) => this.audio.thunder(v),
-      onFlash: () => undefined,
+      onThunder: (v) => this.audio.thunder(this.state === 'playing' ? v : v * 0.5),
     });
 
-    this.seed = (Math.random() * 0xffffffff) >>> 0;
-    this.world = new World(this.seed);
-    this.scene.add(this.world.group);
-    this.apple = new Apple(this.world, {
-      onBounce: (s) => this.audio.bounce(s),
-      onHit: (s) => this.audio.hit(s),
-    });
-    this.scene.add(this.apple.mesh);
     this.playerEvents = {
       onKick: (power, chip) => {
         this.audio.kick(power);
@@ -127,16 +126,24 @@ export class Game {
       },
       onFootstep: (sprinting) => this.audio.footstep(sprinting),
     };
-    this.player = new Player(this.world, this.input, this.playerEvents);
-    this.scene.add(this.player.rig);
+
+    this.seed = (Math.random() * 0xffffffff) >>> 0;
+    this.world = new World(this.seed);
+    this.scene.add(this.world.group);
+    this.createEntities();
 
     this.best = this.loadBest();
     this.hud.onStart(() => this.onOverlayClick());
+    this.hud.onRestart(() => {
+      this.audio.init();
+      this.restart();
+    });
     this.hud.setDistance(0, this.best);
     this.setupWorld();
     this.hud.showStart(this.best);
 
     window.addEventListener('resize', this.onResize);
+    window.addEventListener('blur', this.onBlur);
     document.addEventListener('pointerlockchange', this.onPointerLockChange);
     window.addEventListener('keydown', this.onKeyDown);
     this.onResize();
@@ -145,28 +152,7 @@ export class Game {
   // ---------------------------------------------------------------------------
   // Setup / state
 
-  private setupWorld(): void {
-    this.world.prewarm(0);
-    this.player.reset(this.world.terrain.pathCenterX(0), 0, 0);
-    this.apple.reset(this.world.terrain.pathCenterX(1.2) + 0.15, -1.2);
-    this.storm.reset();
-    this.elapsed = 0;
-    this.tipObstacles = false;
-    this.tipStorm = false;
-    this.player.update(0, this.apple, true);
-    this.updateLighting();
-  }
-
-  private rebuildWorld(): void {
-    this.scene.remove(this.world.group);
-    this.world.dispose();
-    this.seed = (Math.random() * 0xffffffff) >>> 0;
-    this.world = new World(this.seed);
-    this.scene.add(this.world.group);
-    // Apple and player keep their instances but need the new world.
-    this.scene.remove(this.apple.mesh, this.player.rig);
-    this.apple.dispose();
-    this.player.dispose();
+  private createEntities(): void {
     this.apple = new Apple(this.world, {
       onBounce: (s) => this.audio.bounce(s),
       onHit: (s) => this.audio.hit(s),
@@ -174,6 +160,31 @@ export class Game {
     this.scene.add(this.apple.mesh);
     this.player = new Player(this.world, this.input, this.playerEvents);
     this.scene.add(this.player.rig);
+  }
+
+  private setupWorld(): void {
+    this.world.prewarm(0);
+    this.player.reset(this.world.terrain.pathCenterX(0), 0, 0);
+    this.apple.reset(this.world.terrain.pathCenterX(1.2), -1.2);
+    this.storm.reset();
+    this.elapsed = 0;
+    this.tipObstacles = false;
+    this.tipStorm = false;
+    this.tipWhiff = false;
+    this.hintFaded = false;
+    this.player.update(0, this.apple, true);
+    this.updateLighting();
+  }
+
+  private rebuildWorld(): void {
+    this.scene.remove(this.world.group, this.apple.mesh, this.player.rig);
+    this.world.dispose();
+    this.apple.dispose();
+    this.player.dispose();
+    this.seed = (Math.random() * 0xffffffff) >>> 0;
+    this.world = new World(this.seed);
+    this.scene.add(this.world.group);
+    this.createEntities();
     this.setupWorld();
     this.onResize();
   }
@@ -210,12 +221,13 @@ export class Game {
     this.hud.setHintVisible(true);
     this.audio.chime();
     this.requestPointerLock();
+    this.input.cancelDrag();
     this.input.enabled = true;
     this.hud.message('Lauf zum Apfel. Maustaste halten, ziehen, loslassen = Kick!', 3800);
-    window.setTimeout(() => this.hud.setHintVisible(this.state === 'playing' && this.elapsed < 25), 25000);
   }
 
   restart(): void {
+    this.input.cancelDrag();
     this.rebuildWorld();
     this.state = 'menu';
     this.start();
@@ -228,6 +240,9 @@ export class Game {
     this.input.enabled = false;
     this.hud.clearDrag();
     this.hud.showPaused();
+    // Release the pointer so the overlay can be clicked.
+    this.pointerLockWanted = false;
+    if (document.pointerLockElement === this.canvas) document.exitPointerLock();
   }
 
   resume(): void {
@@ -274,16 +289,30 @@ export class Game {
     }
   };
 
+  private readonly onBlur = (): void => {
+    this.pause();
+  };
+
   private readonly onKeyDown = (e: KeyboardEvent): void => {
     if (e.code === 'KeyM') {
       this.audio.setMuted(!this.audio.muted);
       this.hud.message(this.audio.muted ? 'Ton aus' : 'Ton an', 900);
+      return;
     }
-    if (e.code === 'Enter' || e.code === 'NumpadEnter') {
-      if (this.state === 'over') this.onOverlayClick();
-      else if (this.state === 'menu') this.onOverlayClick();
+    if (this.state === 'paused') {
+      if (e.code === 'KeyP' || e.code === 'Enter' || e.code === 'NumpadEnter') this.onOverlayClick();
+      else if (e.code === 'KeyR') {
+        this.audio.init();
+        this.restart();
+      }
+      return;
     }
-    if (e.code === 'KeyP' && this.state === 'playing') this.pause();
+    if (this.state === 'over' || this.state === 'menu') {
+      if (e.code === 'Enter' || e.code === 'NumpadEnter') this.onOverlayClick();
+      return;
+    }
+    // playing
+    if (e.code === 'KeyP' || e.code === 'Escape') this.pause();
   };
 
   private readonly onResize = (): void => {
@@ -327,16 +356,21 @@ export class Game {
       this.apple.update(dt);
     }
     this.storm.update(dt, this.elapsed, this.player.pos, playing);
-    this.sky.update(dt, this.player.camera.getWorldPosition(this.tmp), this.storm.darkness, this.storm.flash);
+    const globalDark = this.globalDarkness();
+    this.sky.update(dt, this.player.camera.getWorldPosition(this.tmp), this.storm.darkness, globalDark, this.storm.flash * (0.4 + 0.6 * globalDark));
     this.updateLighting();
     this.audio.setRain(this.storm.intensity);
-    this.audio.setWind(this.storm.darkness * 0.8);
-    this.audio.update(dt);
+    this.audio.setWind(globalDark * 0.8);
+    this.audio.update();
     this.updateHud();
 
     if (playing) {
       const dist = this.storm.distanceTo(this.player.progress);
       if (dist <= 0) this.gameOver();
+      if (!this.hintFaded && this.elapsed >= HINT_SECONDS) {
+        this.hintFaded = true;
+        this.hud.setHintVisible(false);
+      }
       if (!this.tipObstacles && this.apple.maxProgress > 34) {
         this.tipObstacles = true;
         this.hud.message('Hindernisse voraus! Fester kicken – oder mit Leertaste lupfen.', 3200);
@@ -348,11 +382,23 @@ export class Game {
     }
   }
 
+  /**
+   * The storm shows in the sky behind the player early (storm.darkness), but
+   * the whole scene only turns grey once the front is within ~65 m.
+   */
+  private globalDarkness(): number {
+    return smoothstep(0.45, 1, this.storm.darkness);
+  }
+
   private updateLighting(): void {
-    const dark = this.storm.darkness;
-    const flash = this.storm.flash;
-    this.sun.intensity = 2.9 * (1 - 0.7 * dark) + flash * 1.2;
-    this.hemi.intensity = 1.15 * (1 - 0.45 * dark) + flash * 2.4;
+    const dark = this.globalDarkness();
+    const flash = this.storm.flash * (0.4 + 0.6 * dark);
+    this.sun.intensity = 2.9 * (1 - 0.92 * dark) + flash * 1.2;
+    this.sun.shadow.intensity = 1 - 0.85 * dark;
+    this.hemi.intensity = 1.15 * (1 - 0.35 * dark) + flash * 2.4;
+    this.hemi.color.copy(HEMI_SKY_CLEAR).lerp(HEMI_SKY_STORM, dark);
+    this.hemi.groundColor.copy(HEMI_GROUND_CLEAR).lerp(HEMI_GROUND_STORM, dark);
+    this.renderer.toneMappingExposure = lerp(1.05, 0.8, dark);
     this.fog.color.copy(HORIZON_CLEAR).lerp(HORIZON_STORM, dark);
     this.fog.near = lerp(CFG.render.fogNear, 30, dark);
     this.fog.far = lerp(CFG.render.fogFar, 150, dark);
@@ -369,7 +415,7 @@ export class Game {
     const hud = this.hud;
     hud.setDistance(this.apple.maxProgress, Math.max(this.best, this.apple.maxProgress));
     const dist = this.storm.distanceTo(this.player.progress);
-    hud.setStorm(dist, clamp(1 - dist / 90, 0, 1));
+    hud.setStorm(dist, clamp(1 - dist / 110, 0, 1));
     hud.setStamina(this.player.stamina);
     hud.setVignette(this.storm.intensity * 0.8);
     const drag = this.input.drag;
@@ -390,9 +436,9 @@ export class Game {
     }
     const cam = this.player.camera;
     const v = this.tmp.copy(this.apple.pos);
-    const dist = v.distanceTo(cam.getWorldPosition(new THREE.Vector3()));
+    const dist = v.distanceTo(cam.getWorldPosition(this.tmp2));
     // View space: behind the camera when z > 0.
-    const viewZ = v.clone().applyMatrix4(cam.matrixWorldInverse).z;
+    const viewZ = this.tmp2.copy(v).applyMatrix4(cam.matrixWorldInverse).z;
     v.project(cam);
     const behind = viewZ > 0;
     const onScreen = !behind && Math.abs(v.x) < 0.92 && Math.abs(v.y) < 0.9;
@@ -437,7 +483,7 @@ export class Game {
     for (let i = 0; i < steps; i++) this.update(stepDt);
     for (const k of keys) this.input.keys.delete(k);
     // Finish any chunk generation that was spread over frames.
-    for (let i = 0; i < CFG.chunk.ahead + 2; i++) this.world.update(this.player.pos.z);
+    for (let i = 0; i < 400 && this.world.busy; i++) this.world.update(this.player.pos.z);
     this.render();
   }
 
@@ -445,7 +491,7 @@ export class Game {
   debugTeleport(progress: number): void {
     const x = this.world.terrain.pathCenterX(progress);
     this.player.reset(x, -progress, 0);
-    this.apple.reset(this.world.terrain.pathCenterX(progress + 1.2) + 0.1, -(progress + 1.2));
+    this.apple.reset(this.world.terrain.pathCenterX(progress + 1.2), -(progress + 1.2));
     this.apple.maxProgress = progress;
     this.storm.progress = progress - CFG.storm.startBehind;
     this.world.prewarm(-progress);
@@ -486,6 +532,7 @@ export class Game {
   dispose(): void {
     this.stop();
     window.removeEventListener('resize', this.onResize);
+    window.removeEventListener('blur', this.onBlur);
     document.removeEventListener('pointerlockchange', this.onPointerLockChange);
     window.removeEventListener('keydown', this.onKeyDown);
     this.input.dispose();

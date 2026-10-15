@@ -9,7 +9,7 @@ autumn country lane before the thunderstorm behind you catches up.*
 
 ## Spielen
 
-Du brauchst nur Node.js (≥ 18) und einen Browser mit WebGL.
+Du brauchst nur Node.js (≥ 20.19 bzw. ≥ 22.12) und einen Browser mit WebGL.
 
 ```bash
 npm install
@@ -18,7 +18,10 @@ npm run dev
 
 Dann die angezeigte Adresse (normalerweise <http://localhost:5173>) im Browser öffnen
 und auf **Klicken zum Starten** drücken. Der Mauszeiger wird eingefangen (Pointer Lock),
-`Esc` pausiert.
+`Esc` oder `P` pausiert.
+
+Auf schwachen Rechnern `?quality=low` oder `?quality=medium` an die Adresse hängen
+(weniger bzw. keine Schatten, kein Antialiasing).
 
 ### Steuerung
 
@@ -33,12 +36,12 @@ und auf **Klicken zum Starten** drücken. Der Mauszeiger wird eingefangen (Point
 | `Leertaste` beim Loslassen halten | hoher Lupfer (über Wurzeln und Baumstämme) |
 | `Q` / `E` | Stupser mit dem linken / rechten Fuß |
 | `M` | Ton an/aus |
-| `P` / `Esc` | Pause |
+| `P` / `Esc` | Pause (im Pausenmenü: `R` = Neustart) |
 
 Die **Zugrichtung** bestimmt die Schussrichtung (nach oben ziehen = geradeaus),
 die **Zuglänge** die Kraft. Der Apfel muss dicht vor dem jeweiligen Fuß liegen –
 der linke Fuß erreicht Äpfel links von der Mitte, der rechte rechts. Jeder Fuß gibt
-dem Apfel außerdem einen leichten Drall nach innen.
+dem Apfel außerdem einen leichten Drall nach innen (linker Fuß: nach rechts, rechter Fuß: nach links).
 
 ### Regeln
 
@@ -67,7 +70,7 @@ dem Apfel außerdem einen leichten Drall nach innen.
 npm run dev        # Entwicklungsserver
 npm run build      # Typprüfung + Produktions-Build nach dist/
 npm run preview    # Produktions-Build lokal ansehen
-npm run smoke      # Headless-Test mit Chromium (benötigt CHROME_PATH oder Chrome)
+npm run smoke      # Headless-Test mit Chromium (CHROME_PATH auf ein Chrome/Chromium zeigen lassen)
 ```
 
 Der Produktions-Build in `dist/` ist rein statisch und läuft von jedem Webserver

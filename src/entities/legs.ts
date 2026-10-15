@@ -73,7 +73,11 @@ export class Legs {
     this.mats = [thighMat, shinMat, shoeMat, soleMat];
     this.left = new Leg(-0.12, thighMat, shinMat, shoeMat, soleMat);
     this.right = new Leg(0.12, thighMat, shinMat, shoeMat, soleMat);
-    this.group.add(this.left.hip, this.right.hip);
+    // A simple pelvis block anchors the two thighs.
+    const pelvis = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.16, 0.22), thighMat);
+    pelvis.position.set(0, 0.46 + 0.44 + 0.08 + 0.05, 0.01);
+    pelvis.castShadow = true;
+    this.group.add(this.left.hip, this.right.hip, pelvis);
     this.group.name = 'legs';
   }
 
@@ -86,14 +90,16 @@ export class Legs {
     const a = 0.55 * amount;
     const sl = Math.sin(phase);
     const sr = Math.sin(phase + Math.PI);
-    // A slight forward lean of the thighs keeps the feet visible when looking down.
-    const lean = 0.2 * (1 - amount * 0.5);
+    // A forward lean of the thighs keeps the feet visible when looking down.
+    const lean = 0.3 * (1 - amount * 0.5);
     this.left.target.thigh = a * sl + lean;
     this.right.target.thigh = a * sr + lean;
     this.left.target.knee = Math.max(0, Math.cos(phase)) * 0.95 * amount + 0.08;
     this.right.target.knee = Math.max(0, Math.cos(phase + Math.PI)) * 0.95 * amount + 0.08;
-    this.left.target.ankle = -(this.left.target.thigh - this.left.target.knee) * 0.4;
-    this.right.target.ankle = -(this.right.target.thigh - this.right.target.knee) * 0.4;
+    // Standing: the soles stay flat on the ground; walking: the feet swing a little.
+    const ank = 1.0 - 0.6 * Math.min(1, amount);
+    this.left.target.ankle = -(this.left.target.thigh - this.left.target.knee) * ank;
+    this.right.target.ankle = -(this.right.target.thigh - this.right.target.knee) * ank;
   }
 
   /** Aiming pose: the kicking leg is drawn back proportionally to the power. */

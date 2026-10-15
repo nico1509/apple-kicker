@@ -7,13 +7,4 @@ export const smoothstep = (e0: number, e1: number, x: number): number => {
 /** Exponential damping that is frame-rate independent. */
 export const damp = (current: number, target: number, lambda: number, dt: number): number =>
   lerp(current, target, 1 - Math.exp(-lambda * dt));
-export const TAU = Math.PI * 2;
 export const DEG = Math.PI / 180;
-/** Wrap an angle into (-PI, PI]. */
-export const wrapAngle = (a: number): number => {
-  a = a % TAU;
-  if (a > Math.PI) a -= TAU;
-  if (a <= -Math.PI) a += TAU;
-  return a;
-};
-export const sign = (v: number): number => (v < 0 ? -1 : 1);

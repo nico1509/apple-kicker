@@ -13,10 +13,6 @@ export class AudioEngine {
   private windTarget = 0;
   muted = false;
 
-  get ready(): boolean {
-    return this.ctx !== null;
-  }
-
   init(): void {
     if (this.ctx) {
       if (this.ctx.state === 'suspended') void this.ctx.resume();
@@ -77,13 +73,21 @@ export class AudioEngine {
     if (this.master && this.ctx) this.master.gain.setTargetAtTime(m ? 0 : 0.8, this.ctx.currentTime, 0.05);
   }
 
-  /** Call every frame to smoothly follow the ambience targets. */
-  update(dt: number): void {
+  private appliedRain = -1;
+  private appliedWind = -1;
+
+  /** Call every frame; re-schedules the ambience gains only when a target changed. */
+  update(): void {
     if (!this.ctx || !this.rainGain || !this.windGain) return;
     const t = this.ctx.currentTime;
-    void dt;
-    this.rainGain.gain.setTargetAtTime(this.rainTarget * 0.55, t, 0.4);
-    this.windGain.gain.setTargetAtTime(this.windTarget * 0.5, t, 0.6);
+    if (Math.abs(this.rainTarget - this.appliedRain) > 0.004) {
+      this.appliedRain = this.rainTarget;
+      this.rainGain.gain.setTargetAtTime(this.rainTarget * 0.55, t, 0.4);
+    }
+    if (Math.abs(this.windTarget - this.appliedWind) > 0.004) {
+      this.appliedWind = this.windTarget;
+      this.windGain.gain.setTargetAtTime(this.windTarget * 0.5, t, 0.6);
+    }
   }
 
   setRain(intensity: number): void {

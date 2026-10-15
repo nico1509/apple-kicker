@@ -138,11 +138,19 @@ body {
   }
 }
 
-.stamina {
+.bottom-stack {
   position: absolute;
-  bottom: 70px;
-  left: 50%;
-  transform: translateX(-50%);
+  left: 0;
+  right: 0;
+  bottom: 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  pointer-events: none;
+}
+
+.stamina {
   width: 160px;
   height: 5px;
   background: rgba(0, 0, 0, 0.35);
@@ -267,10 +275,6 @@ body {
 }
 
 .hint {
-  position: absolute;
-  bottom: 16px;
-  left: 50%;
-  transform: translateX(-50%);
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
@@ -296,7 +300,9 @@ body {
   position: absolute;
   inset: 0;
   display: flex;
-  align-items: center;
+  /* flex-start + margin:auto centres when there is room and keeps the top
+     reachable (scrollable) when the panel is taller than the viewport */
+  align-items: flex-start;
   justify-content: center;
   background: radial-gradient(ellipse at center, rgba(10, 14, 10, 0.45), rgba(10, 14, 10, 0.75));
   pointer-events: auto;
@@ -305,6 +311,7 @@ body {
 }
 
 .overlay-content {
+  margin: auto;
   background: rgba(24, 30, 22, 0.86);
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 22px;
@@ -391,6 +398,18 @@ button.start:active {
   box-shadow: 0 3px 0 #9a6414;
 }
 
+button.start.secondary {
+  margin-left: 10px;
+  font-size: 16px;
+  padding: 12px 22px;
+  background: linear-gradient(180deg, #d8d2c0, #b0a890);
+  box-shadow: 0 6px 0 #6f6a58, 0 12px 24px rgba(0, 0, 0, 0.35);
+}
+
+button.start.secondary:active {
+  box-shadow: 0 3px 0 #6f6a58;
+}
+
 .overlay .small {
   font-size: 12px;
   opacity: 0.7;
@@ -417,6 +436,15 @@ button.start:active {
 }
 
 @media (max-width: 640px) {
+  .hud-top {
+    gap: 8px;
+  }
+  .panel,
+  .panel.storm {
+    min-width: 0;
+    flex: 1 1 0;
+    padding: 8px 12px;
+  }
   .panel .value {
     font-size: 22px;
   }

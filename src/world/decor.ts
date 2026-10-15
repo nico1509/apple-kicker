@@ -69,6 +69,7 @@ export class Decor {
   private readonly leafGeo: THREE.BufferGeometry;
   private readonly tuftGeo: THREE.BufferGeometry;
   private readonly farConeGeo: THREE.BufferGeometry;
+  private readonly farBlobGeo: THREE.BufferGeometry;
 
   private readonly m = new THREE.Matrix4();
   private readonly q = new THREE.Quaternion();
@@ -89,12 +90,13 @@ export class Decor {
     this.leafGeo = new THREE.CircleGeometry(1, 5).rotateX(-Math.PI / 2);
     this.tuftGeo = new THREE.ConeGeometry(1, 1, 3).translate(0, 0.5, 0);
     this.farConeGeo = new THREE.ConeGeometry(1, 1, 5).translate(0, 0.5, 0);
+    this.farBlobGeo = new THREE.IcosahedronGeometry(1, 0); // 20 triangles for the fogged distance
   }
 
   dispose(): void {
     for (const g of [
       this.trunkGeo, this.canopyGeo, this.coneGeo, this.bushGeo,
-      this.boxGeo, this.leafGeo, this.tuftGeo, this.farConeGeo,
+      this.boxGeo, this.leafGeo, this.tuftGeo, this.farConeGeo, this.farBlobGeo,
     ]) g.dispose();
     this.flatMat.dispose();
     this.leafMat.dispose();
@@ -219,6 +221,15 @@ export class Decor {
     return x;
   }
 
+  /** Whether chunk i carries a fence on this side (a deterministic 30 % roll). */
+  private fenceOn(i: number, side: Side): boolean {
+    return hash3(i, side, this.terrain.seed + 77) < 0.3;
+  }
+
+  /**
+   * A fence along the meadow edge: posts on a global 2.4 m grid (so fences of
+   * neighbouring chunks line up), only where the biome is meadow.
+   */
   private addFence(b: Batches, chunk: number, i: number, side: Side): void {
     const { p0, p1 } = Terrain.chunkRange(i);
     const d = side * 2.35;
@@ -226,7 +237,19 @@ export class Decor {
     let prevX = NaN;
     let prevY = 0;
     let prevZ = 0;
-    for (let p = p0; p <= p1 + 1e-6; p += step) {
+    const first = Math.ceil(p0 / step) * step;
+    // Bridge to the last post of a fenced previous chunk.
+    if (this.fenceOn(i - 1, side) && this.terrain.biomeAt(first - step, side) === 'meadow') {
+      const pp = first - step;
+      prevX = this.terrain.pathCenterX(pp) + d;
+      prevZ = -pp;
+      prevY = this.terrain.groundHeight(prevX, prevZ);
+    }
+    for (let p = first; p < p1 - 1e-6; p += step) {
+      if (this.terrain.biomeAt(p, side) !== 'meadow') {
+        prevX = NaN;
+        continue;
+      }
       const x = this.terrain.pathCenterX(p) + d;
       const z = -p;
       const y = this.terrain.groundHeight(x, z);
@@ -276,8 +299,9 @@ export class Decor {
           const mx = (x + prevX) / 2;
           const my = (y + prevY) / 2 + 1.15;
           const len = Math.hypot(x - prevX, y - prevY);
+          // A box along local X, tilted about Z to follow the slope.
           const tilt = Math.atan2(y - prevY, x - prevX);
-          this.place(b.box, mx, my, z, len, 0.025, 0.025, Math.PI / 2, POST_COLOR, 0, tilt * (side > 0 ? -1 : 1) * (x > prevX ? 1 : -1));
+          this.place(b.box, mx, my, z, len, 0.025, 0.025, 0, POST_COLOR, 0, tilt);
         }
         prevX = x;
         prevY = y;
@@ -360,7 +384,8 @@ export class Decor {
           this.place(b.farCone, x, y, z, h * 0.3, h, h * 0.3, rng() * 6.28, this.pickColor(CANOPY_COLORS.far, rng, 0.15));
         } else {
           const s = h * 0.45;
-          this.place(b.farBlob, x, y + s * 0.8, z, s, s * 1.1, s, rng() * 6.28, this.pickColor(CANOPY_COLORS.far, rng, 0.15));
+          // Full detail only in the un-fogged near band; a 20-triangle blob beyond.
+          this.place(ax < 100 ? b.farBlob : b.farBlobLod, x, y + s * 0.8, z, s, s * 1.1, s, rng() * 6.28, this.pickColor(CANOPY_COLORS.far, rng, 0.15));
         }
       }
     }
@@ -381,6 +406,7 @@ export class Decor {
       tuft: new Batch(this.tuftGeo, this.tuftMat, false, true),
       farCone: new Batch(this.farConeGeo, this.flatMat, false, false),
       farBlob: new Batch(this.canopyGeo, this.flatMat, false, false),
+      farBlobLod: new Batch(this.farBlobGeo, this.flatMat, false, false),
     };
     const { p0, p1 } = Terrain.chunkRange(i);
 
@@ -393,11 +419,10 @@ export class Decor {
         }
         return false;
       };
-      const fenceChunk = hash3(i, side, this.terrain.seed + 77) < 0.3;
       const singleFieldTree = hash3(i, side, this.terrain.seed + 79) < 0.3;
       let fieldTreePlaced = false;
-      let fenceDone = false;
       let vinesDone = false;
+      if (this.fenceOn(i, side)) this.addFence(b, i, i, side);
 
       for (let k = 0; k < 260; k++) {
         const p = rand(rng, p0, p1);
@@ -446,10 +471,6 @@ export class Decor {
             } else if (d > 2.2 && d < 4 && rng() < 0.04 && !tooClose(x, z, 2)) {
               this.addBush(b, i, x, z, rng, rand(rng, 0.6, 1));
               placed.push([x, z, 1]);
-            }
-            if (fenceChunk && !fenceDone) {
-              fenceDone = true;
-              this.addFence(b, i, i, side);
             }
             break;
           }
@@ -511,5 +532,6 @@ interface Batches {
   tuft: Batch;
   farCone: Batch;
   farBlob: Batch;
+  farBlobLod: Batch;
 }
 

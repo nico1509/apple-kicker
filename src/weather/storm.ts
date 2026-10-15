@@ -5,12 +5,13 @@ import { mulberry32, rand } from '../utils/noise';
 
 export interface StormEvents {
   onThunder(volume: number): void;
-  onFlash(distance: number): void;
 }
 
 const RAIN_DROPS = 2400;
 const RAIN_BOX = 20;
 const RAIN_HEIGHT = 14;
+/** Drops never come closer than this to the eye (they would draw screen-spanning streaks). */
+const RAIN_EYE_CLEAR = 0.8;
 
 /**
  * The bad-weather front chasing the player: a wall of dark clouds, a rain
@@ -22,7 +23,7 @@ export class Storm {
   speed: number = CFG.storm.baseSpeed;
   /** 0..1 rain intensity around the player. */
   intensity = 0;
-  /** 0..1 how dark the sky has become. */
+  /** 0..1 how much of the sky behind the player the storm covers. */
   darkness = 0;
   /** 0..1 current lightning flash brightness. */
   flash = 0;
@@ -37,10 +38,10 @@ export class Storm {
   private nextFlash = 6;
   private readonly pendingThunder: Array<{ at: number; volume: number }> = [];
   private time = 0;
-  private readonly cloudMatDark = new THREE.MeshLambertMaterial({ color: 0x343a44, flatShading: true });
-  private readonly cloudMatMid = new THREE.MeshLambertMaterial({ color: 0x4d5560, flatShading: true });
+  private readonly cloudMatDark = new THREE.MeshLambertMaterial({ color: 0x5a6270, emissive: 0x151820, flatShading: true, fog: false });
+  private readonly cloudMatMid = new THREE.MeshLambertMaterial({ color: 0x7c8591, emissive: 0x1c2028, flatShading: true, fog: false });
   private readonly cloudGeo = new THREE.IcosahedronGeometry(1, 1);
-  private readonly boltMat = new THREE.MeshBasicMaterial({ color: 0xf6f3ff, fog: false });
+  private readonly boltMat = new THREE.MeshBasicMaterial({ color: 0xf6f3ff, fog: false, toneMapped: false });
   private readonly rng = mulberry32(99);
 
   constructor(
@@ -56,15 +57,26 @@ export class Storm {
         const sx = rand(this.rng, 16, 28);
         const sy = rand(this.rng, 9, 15);
         mesh.position.set(x, row === 0 ? rand(this.rng, 14, 20) : rand(this.rng, 26, 36), row === 0 ? rand(this.rng, -4, 6) : rand(this.rng, 6, 18));
+        mesh.userData.baseY = mesh.position.y;
         mesh.scale.set(sx, sy, sx * 0.8);
         mesh.rotation.y = this.rng() * 6.28;
         this.wall.add(mesh);
       }
     }
-    // A low dark band that touches the ground: the rain curtain.
+    // A low grey band that touches the ground: the rain curtain. Its alpha fades
+    // out towards the top and the bottom so no hard edge shows.
+    const curtainGeo = new THREE.PlaneGeometry(520, 48, 1, 24);
+    const cpos = curtainGeo.getAttribute('position');
+    const ccol = new Float32Array(cpos.count * 4);
+    for (let i = 0; i < cpos.count; i++) {
+      const v = cpos.getY(i) / 48 + 0.5; // 0 bottom .. 1 top
+      const alpha = smoothstep(0, 0.3, v) * (1 - smoothstep(0.55, 1, v));
+      ccol[i * 4] = 1; ccol[i * 4 + 1] = 1; ccol[i * 4 + 2] = 1; ccol[i * 4 + 3] = alpha;
+    }
+    curtainGeo.setAttribute('color', new THREE.BufferAttribute(ccol, 4));
     this.curtain = new THREE.Mesh(
-      new THREE.PlaneGeometry(520, 48),
-      new THREE.MeshBasicMaterial({ color: 0x4a515b, transparent: true, opacity: 0.55, side: THREE.DoubleSide, depthWrite: false }),
+      curtainGeo,
+      new THREE.MeshBasicMaterial({ color: 0x5c6470, transparent: true, opacity: 0.55, side: THREE.DoubleSide, depthWrite: false, vertexColors: true, fog: false }),
     );
     this.curtain.position.set(0, 14, -6);
     this.wall.add(this.curtain);
@@ -107,8 +119,14 @@ export class Storm {
   }
 
   private spawnDrop(i: number, anywhere: boolean): void {
-    const x = rand(this.rng, -RAIN_BOX, RAIN_BOX);
-    const z = rand(this.rng, -RAIN_BOX, RAIN_BOX);
+    let x = rand(this.rng, -RAIN_BOX, RAIN_BOX);
+    let z = rand(this.rng, -RAIN_BOX, RAIN_BOX);
+    const h = Math.hypot(x, z);
+    if (h < RAIN_EYE_CLEAR) {
+      const s = RAIN_EYE_CLEAR / Math.max(h, 1e-3);
+      x *= s;
+      z *= s;
+    }
     const y = anywhere ? rand(this.rng, 0, RAIN_HEIGHT) : RAIN_HEIGHT + rand(this.rng, 0, 2);
     const len = rand(this.rng, 0.3, 0.55);
     const o = i * 6;
@@ -126,11 +144,13 @@ export class Storm {
     const playerProgress = -playerPos.z;
     const dist = this.distanceTo(playerProgress);
 
-    // ----- speed: slowly accelerating, capped, with a rubber band when far behind.
+    // ----- speed: slowly accelerating, capped, with a rubber band whose free
+    // lead shrinks over the course of a run.
     const S = CFG.storm;
     const cap = S.capBase + S.capGrowth * elapsed;
     let v = Math.min(cap, S.baseSpeed + S.accel * elapsed);
-    if (dist > S.rubberBandDistance) v += (dist - S.rubberBandDistance) * S.rubberBandGain;
+    const lead = Math.max(S.rubberBandMin, S.rubberBandDistance - S.rubberBandShrink * elapsed);
+    if (dist > lead) v += (dist - lead) * S.rubberBandGain;
     this.speed = v;
     if (advance) this.progress += v * dt;
 
@@ -141,11 +161,13 @@ export class Storm {
     // ----- wall placement: follows the player's x, sits at the front line.
     const frontZ = -this.progress;
     this.wall.position.set(playerPos.x, playerPos.y - 4, frontZ + 10);
-    // Gentle bobbing of the clouds.
-    this.wall.children.forEach((c, i) => {
-      if (c === this.curtain) return;
-      c.position.y += Math.sin(this.time * 0.4 + i) * 0.004;
-    });
+    // Gentle bobbing of the clouds (absolute, so it is frame-rate independent).
+    const kids = this.wall.children;
+    for (let i = 0; i < kids.length; i++) {
+      const c = kids[i];
+      if (c === this.curtain) continue;
+      c.position.y = (c.userData.baseY as number) + 0.5 * Math.sin(this.time * 0.4 + i);
+    }
     (this.curtain.material as THREE.MeshBasicMaterial).opacity = 0.35 + 0.35 * this.darkness;
 
     // ----- rain
@@ -173,6 +195,13 @@ export class Storm {
         p[o + 5] += windZ;
         p[o] += windX;
         p[o + 3] += windX;
+        // Keep the drops out of the eye's immediate vicinity.
+        const h = Math.hypot(p[o], p[o + 2]);
+        if (h < RAIN_EYE_CLEAR) {
+          const s = RAIN_EYE_CLEAR / Math.max(h, 1e-3);
+          p[o] *= s; p[o + 2] *= s;
+          p[o + 3] = p[o] + 0.04; p[o + 5] = p[o + 2] + 0.14;
+        }
         if (p[o + 1] < -1) this.spawnDrop(i, false);
       }
       (this.rain.geometry.getAttribute('position') as THREE.BufferAttribute).needsUpdate = true;
@@ -191,7 +220,9 @@ export class Storm {
       if (this.nextFlash <= 0) {
         const near = 1 - smoothstep(0, 220, dist);
         this.nextFlash = rand(this.rng, 3.5, 11) * (1.6 - near);
-        this.triggerFlash(playerPos, frontZ, dist);
+        // Menu, pause, game over: fewer and softer flashes.
+        if (!advance) this.nextFlash = Math.max(this.nextFlash, 7);
+        this.triggerFlash(playerPos, frontZ, dist, advance ? 0.3 + 0.7 * near : 0.35);
       }
     }
     // Thunder arrives after the flash.
@@ -203,10 +234,12 @@ export class Storm {
     }
   }
 
-  private triggerFlash(playerPos: THREE.Vector3, frontZ: number, dist: number): void {
-    this.flash = 1;
-    const x = playerPos.x + rand(this.rng, -70, 70);
-    const z = frontZ + rand(this.rng, 4, 30);
+  private triggerFlash(playerPos: THREE.Vector3, frontZ: number, dist: number, strength: number): void {
+    this.flash = strength;
+    const x = playerPos.x + rand(this.rng, -45, 45);
+    // In front of the cloud wall (its nearest faces reach ~frontZ-16) but never
+    // closer than 20 m to the player.
+    const z = Math.max(frontZ - rand(this.rng, 14, 24), playerPos.z + 20);
     const top = playerPos.y + rand(this.rng, 26, 34);
     const pts: THREE.Vector3[] = [];
     const segs = 9;
@@ -220,13 +253,12 @@ export class Storm {
     }
     const curve = new THREE.CatmullRomCurve3(pts, false, 'catmullrom', 0);
     this.bolt.geometry.dispose();
-    this.bolt.geometry = new THREE.TubeGeometry(curve, segs * 2, 0.22, 4, false);
+    this.bolt.geometry = new THREE.TubeGeometry(curve, segs * 2, 0.35, 4, false);
     this.bolt.visible = true;
-    this.boltTimer = rand(this.rng, 0.08, 0.16);
+    this.boltTimer = rand(this.rng, 0.12, 0.2);
     const delay = clamp(dist / 95, 0.25, 3.5);
-    const volume = clamp(1 - dist / 260, 0.12, 1);
+    const volume = clamp(1 - Math.max(dist, 0) / 260, 0.12, 1) * (strength > 0.34 ? 1 : 0.5);
     this.pendingThunder.push({ at: this.time + delay, volume });
-    this.events.onFlash(dist);
   }
 
   dispose(): void {

@@ -6,11 +6,6 @@ import { Terrain } from './terrain';
 
 export type ObstacleKind = 'root' | 'branch' | 'log' | 'stone' | 'puddle';
 
-export interface ObstacleInfo {
-  kind: ObstacleKind;
-  p: number;
-}
-
 /**
  * Obstacles lie across the track and get denser and bigger with distance.
  * Each obstacle is both a mesh and one or more colliders.
@@ -21,16 +16,16 @@ export class Obstacles {
   private readonly logMat = new THREE.MeshLambertMaterial({ color: 0x7a5a3e, flatShading: true });
   private readonly logEndMat = new THREE.MeshLambertMaterial({ color: 0xc9a977, flatShading: true });
   private readonly stoneMat = new THREE.MeshLambertMaterial({ color: 0x8c8c84, flatShading: true });
+  // No metalness: without an environment map a metallic surface renders black.
   private readonly puddleMat = new THREE.MeshStandardMaterial({
-    color: 0x46535e,
-    roughness: 0.12,
-    metalness: 0.45,
+    color: 0x7c93a6,
+    roughness: 0.35,
+    metalness: 0,
     transparent: true,
-    opacity: 0.9,
+    opacity: 0.85,
   });
   private readonly stoneGeo = new THREE.IcosahedronGeometry(1, 0);
   private readonly stubGeo = new THREE.CylinderGeometry(0.5, 1, 1, 5).translate(0, 0.5, 0);
-  readonly placed: ObstacleInfo[] = [];
 
   constructor(
     private readonly terrain: Terrain,
@@ -82,7 +77,6 @@ export class Obstacles {
       // Keep obstacles off very steep bits of track.
       if (Math.abs(this.terrain.pathSlope(p)) > 0.3) continue;
       const kind = this.pickKind(p, rng);
-      this.placed.push({ kind, p });
       switch (kind) {
         case 'root': this.addRoot(group, i, p, rng); break;
         case 'branch': this.addBranch(group, i, p, rng); break;
@@ -110,7 +104,8 @@ export class Obstacles {
   ): THREE.Vector3[] {
     const cx = this.terrain.pathCenterX(p);
     const heading = this.terrain.pathHeading(p);
-    const angle = heading + Math.PI / 2 + rand(rng, -0.5, 0.5);
+    // (cos a, -sin a) is the "right" vector for yaw a, i.e. across the lane.
+    const angle = heading + rand(rng, -0.5, 0.5);
     const d0 = rand(rng, -0.7, 0.7);
     const dirX = Math.cos(angle);
     const dirZ = -Math.sin(angle);
@@ -199,7 +194,7 @@ export class Obstacles {
     const length = rand(rng, 3, 4.8);
     const cx = this.terrain.pathCenterX(p);
     const heading = this.terrain.pathHeading(p);
-    const angle = heading + Math.PI / 2 + rand(rng, -0.35, 0.35);
+    const angle = heading + rand(rng, -0.35, 0.35); // across the lane
     const d0 = rand(rng, -0.6, 0.6);
     const dirX = Math.cos(angle);
     const dirZ = -Math.sin(angle);
@@ -266,7 +261,8 @@ export class Obstacles {
     const z = -p;
     const rx = rand(rng, 0.7, 1.4);
     const rz = rand(rng, 0.45, 0.8);
-    const angle = this.terrain.pathHeading(p) + rand(rng, -0.3, 0.3);
+    // Long axis along the lane (the ring uses a standard rotation of (lx, lz)).
+    const angle = Math.PI / 2 - this.terrain.pathHeading(p) + rand(rng, -0.3, 0.3);
     const segs = 14;
     const positions: number[] = [];
     const c = Math.cos(angle);

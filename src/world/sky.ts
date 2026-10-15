@@ -17,8 +17,22 @@ uniform vec3 groundColor;
 uniform vec3 stormColor;
 uniform vec3 sunDir;
 uniform float stormAmount;
+uniform float stormGlobal;
 uniform float flash;
 varying vec3 vWorldPos;
+
+float hash21(vec2 p) {
+  p = fract(p * vec2(123.34, 456.21));
+  p += dot(p, p + 45.32);
+  return fract(p.x * p.y);
+}
+
+float vnoise(vec2 p) {
+  vec2 i = floor(p);
+  vec2 f = fract(p);
+  f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(hash21(i), hash21(i + vec2(1.0, 0.0)), f.x), mix(hash21(i + vec2(0.0, 1.0)), hash21(i + vec2(1.0, 1.0)), f.x), f.y);
+}
 
 void main() {
   vec3 dir = normalize(vWorldPos - cameraPosition);
@@ -26,20 +40,24 @@ void main() {
   vec3 sky = mix(horizonColor, topColor, pow(clamp(h, 0.0, 1.0), 0.5));
   vec3 col = h < 0.0 ? mix(horizonColor, groundColor, clamp(-h * 5.0, 0.0, 1.0)) : sky;
 
-  // Wispy cirrus streaks like on a clear October morning.
-  float streak = sin(dir.x * 14.0 + dir.z * 6.0 + dir.y * 3.0) * sin(dir.z * 19.0 - dir.x * 4.0 + dir.y * 31.0);
-  float cirrus = smoothstep(0.45, 0.95, streak) * smoothstep(0.03, 0.3, h) * (1.0 - smoothstep(0.55, 0.9, h));
-  col = mix(col, vec3(0.93, 0.95, 0.98), cirrus * 0.45 * (1.0 - stormAmount));
+  // Wispy cirrus: value noise projected onto a high cloud layer and stretched
+  // along the wind so it forms long streaks like on a clear October morning.
+  vec2 uv = dir.xz / max(h, 0.04);
+  uv = vec2(uv.x * 0.35 - uv.y * 0.15, uv.y * 0.9 + uv.x * 0.3);
+  float n = vnoise(uv * 0.9) * 0.5 + vnoise(uv * 2.1 + 3.7) * 0.3 + vnoise(uv * 4.3 + 9.1) * 0.2;
+  float cirrus = smoothstep(0.5, 0.78, n) * smoothstep(0.03, 0.25, h) * (1.0 - smoothstep(0.6, 0.95, h));
+  col = mix(col, vec3(0.93, 0.95, 0.98), cirrus * 0.55 * (1.0 - stormGlobal));
 
   // Sun disc and glow.
   float sd = max(dot(dir, sunDir), 0.0);
   col += vec3(1.0, 0.93, 0.78) * (pow(sd, 400.0) * 1.4 + pow(sd, 10.0) * 0.16);
 
-  // The storm darkens the sky behind the player (towards +Z) and slowly overhead.
+  // The storm darkens the sky behind the player (towards +Z); the rest of the
+  // sky only follows once the front is close (stormGlobal).
   float facing = dot(normalize(vec3(dir.x, 0.0, dir.z) + vec3(0.0, 0.0, 0.0001)), vec3(0.0, 0.0, 1.0));
   float s = smoothstep(-0.4, 0.8, facing) * stormAmount;
-  s = max(s, stormAmount * 0.45 * smoothstep(0.25, 0.9, h));
-  s = max(s, stormAmount * stormAmount * 0.6);
+  s = max(s, stormGlobal * 0.5 * smoothstep(0.25, 0.9, h));
+  s = max(s, stormGlobal * stormGlobal * 0.6);
   col = mix(col, stormColor * (1.0 - 0.35 * clamp(h, 0.0, 1.0)), clamp(s, 0.0, 1.0));
   col += vec3(0.9, 0.9, 1.0) * flash * 0.7;
 
@@ -60,9 +78,12 @@ export class Sky {
     stormColor: { value: THREE.Color };
     sunDir: { value: THREE.Vector3 };
     stormAmount: { value: number };
+    stormGlobal: { value: number };
     flash: { value: number };
   };
-  private readonly cloudMat = new THREE.MeshLambertMaterial({ color: 0xffffff, flatShading: true });
+  // No fog on the clouds (they would grey out against the un-fogged dome); the
+  // emissive term lifts the undersides.
+  private readonly cloudMat = new THREE.MeshLambertMaterial({ color: 0xffffff, emissive: 0x8e98a6, flatShading: true, fog: false });
   private readonly cloudGeos: THREE.BufferGeometry[] = [];
   private readonly drift: number[] = [];
   private time = 0;
@@ -78,6 +99,7 @@ export class Sky {
       stormColor: { value: new THREE.Color(0x3b4048) },
       sunDir: { value: sunDir.clone().normalize() },
       stormAmount: { value: 0 },
+      stormGlobal: { value: 0 },
       flash: { value: 0 },
     };
     const mat = new THREE.ShaderMaterial({
@@ -88,7 +110,9 @@ export class Sky {
       depthWrite: false,
       fog: false,
     });
-    this.mesh = new THREE.Mesh(new THREE.SphereGeometry(900, 24, 16), mat);
+    // The shader only uses the view direction, so the radius just has to stay
+    // inside the camera's far plane.
+    this.mesh = new THREE.Mesh(new THREE.SphereGeometry(100, 24, 16), mat);
     this.mesh.frustumCulled = false;
     this.mesh.renderOrder = -10;
     scene.add(this.mesh);
@@ -120,19 +144,27 @@ export class Sky {
     scene.add(this.clouds);
   }
 
-  update(dt: number, camPos: THREE.Vector3, stormAmount: number, flash: number): void {
+  /**
+   * @param stormAmount 0..1 how much the storm shows in the sky behind the player
+   * @param stormGlobal 0..1 how far the whole sky has turned grey (front close)
+   */
+  update(dt: number, camPos: THREE.Vector3, stormAmount: number, stormGlobal: number, flash: number): void {
     this.time += dt;
     this.mesh.position.copy(camPos);
     // Clouds follow the camera with a little parallax and drift with the wind.
     this.clouds.position.set(camPos.x * 0.85, 0, camPos.z * 0.85);
-    this.clouds.children.forEach((c, i) => {
+    for (let i = 0; i < this.clouds.children.length; i++) {
+      const c = this.clouds.children[i];
       c.position.x += this.drift[i] * dt;
       if (c.position.x > 360) c.position.x -= 720;
-    });
+    }
     this.uniforms.stormAmount.value = stormAmount;
+    this.uniforms.stormGlobal.value = stormGlobal;
     this.uniforms.flash.value = flash;
     // Clouds turn grey when the storm is near.
-    this.cloudMat.color.setRGB(1 - stormAmount * 0.55, 1 - stormAmount * 0.55, 1 - stormAmount * 0.5);
+    const g = stormGlobal;
+    this.cloudMat.color.setRGB(1 - g * 0.55, 1 - g * 0.55, 1 - g * 0.5);
+    this.cloudMat.emissive.setRGB(0.556 * (1 - g * 0.7), 0.596 * (1 - g * 0.7), 0.651 * (1 - g * 0.65));
   }
 
   dispose(): void {

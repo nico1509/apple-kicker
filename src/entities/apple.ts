@@ -137,7 +137,10 @@ export class Apple {
     this.accumulator += dt;
     let steps = 0;
     while (this.accumulator >= SUBSTEP && steps < MAX_SUBSTEPS) {
-      this.step(SUBSTEP);
+      // Keep the travel per inner step below ~1.5 cm so that thin colliders
+      // (branches) are met with a small, consistent penetration.
+      const n = Math.max(1, Math.min(10, Math.ceil((this.vel.length() * SUBSTEP) / 0.015)));
+      for (let k = 0; k < n; k++) this.step(SUBSTEP / n);
       this.accumulator -= SUBSTEP;
       steps++;
     }
@@ -196,7 +199,8 @@ export class Apple {
           const e = CFG.apple.restitution * (impact > 3 ? 1 : 0.6);
           vel.multiplyScalar(1 - 0.12);
           vel.addScaledVector(n, impact * e);
-          this.curl *= 0.5;
+          // The side spin is spent at the first touch: the roll continues straight.
+          this.curl = 0;
           if (impact > 1.6 && this.bounceCooldown <= 0) {
             this.events.onBounce(impact);
             this.bounceCooldown = 0.08;
@@ -246,7 +250,9 @@ export class Apple {
         vel.x -= c.nx * vn;
         vel.y -= c.ny * vn;
         vel.z -= c.nz * vn;
-        vel.multiplyScalar(1 - s.friction * 0.5);
+        // Impact friction only: in resting contact vn is just -g*dt and the
+        // apple must keep rolling off (otherwise it freezes on bush crowns).
+        if (-vn > 0.3) vel.multiplyScalar(1 - s.friction * 0.5);
         const bounce = -vn * s.restitution;
         vel.x += c.nx * bounce;
         vel.y += c.ny * bounce;
@@ -259,6 +265,13 @@ export class Apple {
         }
       }
     });
+
+    // The start line is a wall for the apple so it can never leave the walkable area.
+    const wallZ = CFG.path.startLineZ - 0.6;
+    if (pos.z > wallZ) {
+      pos.z = wallZ;
+      if (vel.z > 0) vel.z *= -0.15;
+    }
 
     if (this.progress > this.maxProgress) this.maxProgress = this.progress;
   }

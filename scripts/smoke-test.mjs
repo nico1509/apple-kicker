@@ -15,10 +15,11 @@
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright-core';
 
 const PORT = 4173;
-const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const shots = path.join(root, 'screenshots');
 fs.mkdirSync(shots, { recursive: true });
 const quality = process.env.QUALITY || 'low';
@@ -45,7 +46,9 @@ if (!url) {
     console.error('dist/ is missing – run `npm run build` first.');
     process.exit(1);
   }
-  server = spawn('npx', ['vite', 'preview', '--port', String(PORT), '--strictPort', '--host', '127.0.0.1'], {
+  // Run vite directly with node (no npx, no shell) so that kill() works everywhere.
+  const viteBin = path.join(root, 'node_modules', 'vite', 'bin', 'vite.js');
+  server = spawn(process.execPath, [viteBin, 'preview', '--port', String(PORT), '--strictPort', '--host', '127.0.0.1'], {
     cwd: root,
     stdio: 'ignore',
   });
@@ -148,7 +151,9 @@ try {
 
   await simulate(0.6, ['KeyW']);
   const s2 = await state();
-  check(s2.playerZ < s1.playerZ - 1.5, `player walks forward (${s2.playerZ.toFixed(2)} m)`);
+  // The apple sits 1.2 m ahead: the body bumps it and is held back a little.
+  check(s2.playerZ < s1.playerZ - 0.8, `player walks forward (${s2.playerZ.toFixed(2)} m)`);
+  check(s2.appleProgress > 1.3 || !s2.appleResting, `walking into the apple nudges it (${s2.appleProgress.toFixed(2)} m)`);
 
   // Mouse deltas without pointer lock rotate the view.
   await page.mouse.move(640, 360);

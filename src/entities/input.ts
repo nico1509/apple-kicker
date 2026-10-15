@@ -85,6 +85,12 @@ export class Input {
     this.keys.clear();
     this.drag = null;
   };
+  private readonly onMouseLeave = (): void => {
+    // Without pointer lock the cursor may re-enter anywhere: do not turn the
+    // view by the jump.
+    this.lastClientX = null;
+    this.lastClientY = null;
+  };
 
   constructor(private readonly target: HTMLElement) {
     window.addEventListener('keydown', this.onKeyDown);
@@ -94,6 +100,7 @@ export class Input {
     target.addEventListener('mousedown', this.onMouseDown);
     window.addEventListener('mouseup', this.onMouseUp);
     target.addEventListener('contextmenu', this.onContextMenu);
+    target.addEventListener('mouseleave', this.onMouseLeave);
   }
 
   /** Finish the current drag and turn it into a kick request. */
@@ -104,9 +111,10 @@ export class Input {
     this.kicks.push({ foot: d.foot, dx: d.dx, dy: d.dy, chip: this.keys.has('Space'), tap: false });
   }
 
-  /** Cancel any pending drag without kicking. */
+  /** Cancel any pending drag and queued kick requests (pause, game over). */
   cancelDrag(): void {
     this.drag = null;
+    this.kicks.length = 0;
   }
 
   isDown(code: string): boolean {
@@ -134,5 +142,6 @@ export class Input {
     this.target.removeEventListener('mousedown', this.onMouseDown);
     window.removeEventListener('mouseup', this.onMouseUp);
     this.target.removeEventListener('contextmenu', this.onContextMenu);
+    this.target.removeEventListener('mouseleave', this.onMouseLeave);
   }
 }
