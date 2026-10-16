@@ -9,8 +9,15 @@ export type Cause = 'player' | 'apple' | 'thirst';
 export const EASY_LIVES = 3;
 
 const APPLE_ICON = './favicon.svg';
+/** Running shoe with a speed line for the stamina bar. */
+const STAMINA_ICON = `<svg class="meter-icon" viewBox="0 0 32 32" aria-hidden="true">
+  <path d="M9 9h7l2 6c3 .6 6 1.6 8.5 3.2 1.6 1 2.5 2.4 2.5 4V25H3v-4.5L5 16z" fill="#9bd36a"/>
+  <path d="M3 25h26v2.5a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z" fill="#f6f1e4"/>
+  <path d="M12 15l3-1M13 18l3-1" stroke="#2f6b25" stroke-width="1.6" stroke-linecap="round"/>
+  <path d="M1 12h5M0 16h4M1 20h3" stroke="#f6f1e4" stroke-width="1.6" stroke-linecap="round" opacity="0.7"/>
+</svg>`;
 /** Small apple-spritzer bottle for the thirst bar. */
-const BOTTLE_ICON = `<svg class="bottle-icon" viewBox="0 0 16 40" aria-hidden="true">
+const BOTTLE_ICON = `<svg class="meter-icon bottle-icon" viewBox="0 0 16 40" aria-hidden="true">
   <path d="M6 1h4v2l.3 7c3.2 2.4 4.7 4.6 4.7 8V38a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 1 38V18c0-3.4 1.5-5.6 4.7-8L6 3z" fill="#e0a83c"/>
   <rect x="5.6" y="0" width="4.8" height="2.4" rx="0.6" fill="#2f9a2c"/>
   <rect x="5.9" y="6" width="4.2" height="2.2" fill="#3fae35"/>
@@ -27,6 +34,7 @@ export class Hud {
   private readonly stormBar: HTMLElement;
   private readonly stormWrap: HTMLElement;
   private readonly staminaBar: HTMLElement;
+  private readonly staminaWrap: HTMLElement;
   private readonly thirstBar: HTMLElement;
   private readonly thirstWrap: HTMLElement;
   private readonly messageEl: HTMLElement;
@@ -66,9 +74,13 @@ export class Hud {
       <div class="hud-top">
         <div class="hud-left">
           <div class="panel distance"><span class="label">Apfel</span><span class="value" data-distance>0 m</span><span class="best" data-best></span></div>
-          <div class="panel thirst" data-thirst-wrap>
+          <div class="panel meter thirst" data-thirst-wrap>
             ${BOTTLE_ICON}
-            <div class="thirst-body"><span class="label">Durst</span><div class="bar"><div class="fill" data-thirst></div></div></div>
+            <div class="meter-body"><span class="label">Durst</span><div class="bar"><div class="fill" data-thirst></div></div></div>
+          </div>
+          <div class="panel meter stamina" data-stamina-wrap>
+            ${STAMINA_ICON}
+            <div class="meter-body"><span class="label">Ausdauer</span><div class="bar"><div class="fill" data-stamina></div></div></div>
           </div>
         </div>
         <div class="lives" data-lives hidden></div>
@@ -86,7 +98,6 @@ export class Hud {
       <div class="apple-indicator" hidden><span class="chevron">➤</span><span class="ind-label"></span></div>
       <div class="message" hidden></div>
       <div class="bottom-stack">
-        <div class="stamina"><div class="fill" data-stamina></div></div>
         <div class="hint">
           <span><b>WASD</b> laufen</span><span><b>Shift</b> sprinten</span>
           <span><b>Linke Maus</b> linker Fuß</span><span><b>Rechte Maus</b> rechter Fuß</span>
@@ -106,6 +117,7 @@ export class Hud {
     this.stormBar = q('[data-storm-bar]');
     this.stormWrap = q('[data-storm-wrap]');
     this.staminaBar = q('[data-stamina]');
+    this.staminaWrap = q('[data-stamina-wrap]');
     this.thirstBar = q('[data-thirst]');
     this.thirstWrap = q('[data-thirst-wrap]');
     this.messageEl = q('.message');
@@ -221,8 +233,8 @@ export class Hud {
 
   setStamina(v: number, exhausted = false): void {
     this.staminaBar.style.width = `${Math.round(v * 100)}%`;
-    this.staminaBar.parentElement?.classList.toggle('low', v < 0.25);
-    this.staminaBar.parentElement?.classList.toggle('exhausted', exhausted);
+    this.staminaWrap.classList.toggle('low', v < 0.25);
+    this.staminaWrap.classList.toggle('exhausted', exhausted);
   }
 
   /** Thirst bar: 1 = quenched, 0 = parched (that costs a life). */

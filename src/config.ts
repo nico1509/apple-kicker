@@ -23,8 +23,8 @@ export const CFG = {
     walkSpeed: 4.2,
     sprintSpeed: 6.6,
     accel: 22,
-    staminaMax: 6, // seconds of sprint
-    staminaRegen: 0.6, // seconds of stamina regained per second
+    staminaMax: 3, // seconds of sprint
+    staminaRegen: 0.3, // seconds of stamina regained per second (a tenth of the bar per second)
     exhaustedSeconds: 1, // sprinting the stamina empty stops the player for this long
     pitchMin: -1.5,
     pitchMax: 1.1,
@@ -52,7 +52,7 @@ export const CFG = {
     curl: 0.12, // side spin per foot: a light, visible bend that keeps a straight kick on the lane
   },
   thirst: {
-    drainSeconds: 35, // a full thirst bar empties in this time
+    drainSeconds: 17.5, // a full thirst bar empties in this time
     refill: 0.5, // one bottle refills half the bar
     warnBelow: 0.25,
     firstBottle: 20, // no bottles on the first metres

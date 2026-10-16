@@ -117,7 +117,7 @@ async function walkAndKick(foot, powerPx, aimYaw = 0, chip = false, shotName = n
   let d = dist;
   for (let leg = 0; leg < 8 && d > 6; leg++) {
     const c = await state();
-    if (c.stamina > 0.15) await simulate(Math.min((d - 5) / 6.4, c.stamina * 6 - 0.3), ['KeyW', 'ShiftLeft']);
+    if (c.stamina > 0.15) await simulate(Math.min((d - 5) / 6.4, c.stamina * 3 - 0.3), ['KeyW', 'ShiftLeft']);
     else await simulate(Math.min((d - 5) / 4.2, 2), ['KeyW']);
     const n = await state();
     d = Math.hypot(n.applePx - n.playerX, n.applePz - n.playerZ);
@@ -393,10 +393,10 @@ try {
   check(e5.state === 'playing' && e5.lives === 3 && e5.appleMax < 1, 'restart gives all lives back');
 
   // Thirst: the bar drains, bottles on the path refill half of it, empty costs a life.
-  check(e5.thirst > 0.99, `a run starts quenched (${e5.thirst.toFixed(3)})`);
+  check(e5.thirst > 0.98, `a run starts quenched (${e5.thirst.toFixed(3)})`);
   await simulate(2);
   const t0 = await state();
-  check(t0.thirst < 0.96 && t0.thirst > 0.9, `the thirst bar drains (${t0.thirst.toFixed(3)})`);
+  check(t0.thirst < 0.92 && t0.thirst > 0.85, `the thirst bar drains (${t0.thirst.toFixed(3)})`);
   await page.evaluate(() => window.__appleKicker.teleport(300));
   await simulate(0.1);
   const bottles = await page.evaluate(() => window.__appleKicker.game.debugBottles());
