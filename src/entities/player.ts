@@ -54,6 +54,9 @@ export class Player {
   private readonly tmp2 = new THREE.Vector3();
   private readonly contact: Contact = { nx: 0, ny: 0, nz: 0, depth: 0, surface: { restitution: 0, friction: 0 } };
   private inBush = 0;
+  /** Displacement still to be applied from a shove (e.g. camel spit), in metres. */
+  private shoveX = 0;
+  private shoveZ = 0;
 
   constructor(
     private readonly world: World,
@@ -71,6 +74,12 @@ export class Player {
     this.rig.name = 'player';
   }
 
+  /** Push the player by (dx, dz) metres; applied smoothly over a few frames. */
+  shove(dx: number, dz: number): void {
+    this.shoveX += dx;
+    this.shoveZ += dz;
+  }
+
   get progress(): number {
     return -this.pos.z;
   }
@@ -86,6 +95,7 @@ export class Player {
   reset(x: number, z: number, yaw: number): void {
     this.pos.set(x, this.world.groundHeight(x, z), z);
     this.vel.set(0, 0, 0);
+    this.shoveX = this.shoveZ = 0;
     this.yaw = yaw;
     this.pitch = -0.25;
     this.stamina = 1;
@@ -167,6 +177,14 @@ export class Player {
       this.vel.z = damp(this.vel.z, targetVz, accel / 4, dt);
       this.pos.x += this.vel.x * dt;
       this.pos.z += this.vel.z * dt;
+      if (this.shoveX !== 0 || this.shoveZ !== 0) {
+        const f = 1 - Math.exp(-8 * dt);
+        this.pos.x += this.shoveX * f;
+        this.pos.z += this.shoveZ * f;
+        this.shoveX *= 1 - f;
+        this.shoveZ *= 1 - f;
+        if (Math.abs(this.shoveX) + Math.abs(this.shoveZ) < 1e-3) this.shoveX = this.shoveZ = 0;
+      }
       // Never walk backwards past the start line.
       if (this.pos.z > CFG.path.startLineZ) this.pos.z = CFG.path.startLineZ;
     }

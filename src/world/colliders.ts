@@ -35,6 +35,7 @@ export const SURFACES = {
   bush: { restitution: 0.12, friction: 0.75, soft: true },
   trunk: { restitution: 0.4, friction: 0.3 },
   post: { restitution: 0.45, friction: 0.2 },
+  fur: { restitution: 0.25, friction: 0.55 },
 } as const satisfies Record<string, Surface>;
 
 /** Result of a closest-point query against a collider. */

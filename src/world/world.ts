@@ -81,6 +81,7 @@ export class World {
     Decor.disposeGroup(c.decor);
     Obstacles.disposeGroup(c.obstacles);
     this.colliders.removeChunk(i);
+    this.obstacles.removeChunk(i);
     this.chunks.delete(i);
   }
 

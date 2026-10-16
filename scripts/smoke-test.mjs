@@ -244,7 +244,7 @@ try {
   check(m3.appleIndicator, `apple 75 m away in view is marked (indicator=${m3.appleIndicator})`);
 
   // The landscape changes every 1000 m and loops back to the forest.
-  for (const [at, expected, name] of [[1150, 'greece', '05c-greece.png'], [1620, 'greece', '05d-greece-later.png'], [2150, 'forest', '05e-forest-again.png']]) {
+  for (const [at, expected, name] of [[1150, 'greece', '05c-greece.png'], [1620, 'greece', '05d-greece-later.png'], [2150, 'desert', '05e-desert.png'], [3150, 'forest', '05f-forest-again.png']]) {
     await page.evaluate((p) => window.__appleKicker.teleport(p), at);
     await look(0, -0.12);
     await simulate(0.3);
@@ -253,10 +253,69 @@ try {
     check(sl.landscape === expected, `landscape at ${at} m is ${expected} (${sl.landscape})`);
   }
   const rg = await walkAndKick('right', 320, 0);
-  check(rg.after.appleMax > 2150, `apple still moves after the landscapes looped (${rg.after.appleMax.toFixed(1)} m)`);
+  check(rg.after.appleMax > 3150, `apple still moves after the landscapes looped (${rg.after.appleMax.toFixed(1)} m)`);
   await page.evaluate(() => window.__appleKicker.teleport(1300));
   const rg2 = await walkAndKick('right', 320, 0);
   check(rg2.after.appleMax > 1300, `apple moves through Greek obstacles (${rg2.after.appleMax.toFixed(1)} m)`);
+
+  // Desert camel: within 20 m it spits at once and then every second; a hit pushes the player ~5 m.
+  const camelAt = await page.evaluate(() => {
+    const k = window.__appleKicker;
+    for (let p = 2050; p < 2950; p += 120) {
+      k.teleport(p);
+      let best = null;
+      for (const list of k.game.world.obstacles.camels.values()) {
+        for (const c of list) {
+          const q = -c.group.position.z;
+          if (q > p + 8 && (best === null || q < best.q)) best = { q, x: c.group.position.x, z: c.group.position.z };
+        }
+      }
+      if (best) return best;
+    }
+    return null;
+  });
+  check(camelAt !== null, `a camel lies on the desert track (${camelAt ? camelAt.q.toFixed(0) + ' m' : 'none'})`);
+  if (camelAt) {
+    const standAt = async (dist) => {
+      await page.evaluate(([c, dist]) => {
+        const g = window.__appleKicker.game;
+        g.debugTeleport(c.q - dist);
+        g.storm.progress = c.q - dist - 50;
+        // Keep the apple out of the way.
+        g.apple.reset(g.world.terrain.pathCenterX(c.q - dist - 3), -(c.q - dist - 3));
+        const pz = -(c.q - dist);
+        const px = g.world.terrain.pathCenterX(c.q - dist) - (c.x - g.world.terrain.pathCenterX(c.q)) ;
+        g.player.reset(px, pz, 0);
+        g.debugLook(Math.atan2(-(c.x - px), -(c.z - pz)), -0.1);
+      }, [camelAt, dist]);
+    };
+    await standAt(24);
+    const f0 = await page.evaluate(() => window.__appleKicker.game.spit.fired);
+    await simulate(4);
+    const f1 = await page.evaluate(() => window.__appleKicker.game.spit.fired);
+    check(f1 === f0, `camel ignores a player 24 m away (${f1 - f0} spits)`);
+    await standAt(6);
+    const before = await state();
+    await simulate(0.05);
+    const f2 = await page.evaluate(() => window.__appleKicker.game.spit.fired);
+    check(f2 - f1 === 1, `camel spits at once when the player steps within 20 m (${f2 - f1} spits)`);
+    const timer = await page.evaluate((c) => {
+      for (const list of window.__appleKicker.game.world.obstacles.camels.values()) {
+        for (const k of list) if (Math.abs(k.group.position.z - c.z) < 0.01) return k.timer;
+      }
+      return -1;
+    }, camelAt);
+    check(timer > 0.9 && timer <= 1, `next spit follows 1 s later (timer ${timer.toFixed(2)} s)`);
+    await simulate(0.5);
+    await shot('05g-camel.png');
+    await simulate(1.5);
+    const after = await state();
+    const moved = Math.hypot(after.playerX - before.playerX, after.playerZ - before.playerZ);
+    check(moved > 4.5, `a spit pushes the player at least 5 m (${moved.toFixed(2)} m)`);
+  }
+  // Back to the state the storm checks below expect: player at 300 m, apple far ahead.
+  await page.evaluate(() => window.__appleKicker.teleport(300));
+  await placeApple(375);
 
   // Storm catches the player (apple far ahead) → game over.
   await page.evaluate(() => {

@@ -15,7 +15,8 @@ import { LANDSCAPE_LENGTH, landscapeOfIndex, landscapeWeight, type Landscape } f
 /** Biomes of the autumn forest landscape and of the Greek late-summer landscape. */
 export type BiomeType =
   | 'forest' | 'meadow' | 'field' | 'vineyard' | 'hedge'
-  | 'phrygana' | 'olive' | 'stubble' | 'farmstead';
+  | 'phrygana' | 'olive' | 'stubble' | 'farmstead'
+  | 'dunes' | 'oasis' | 'ruins' | 'blackdesert';
 export type Side = -1 | 1;
 
 export interface BiomeMix {
@@ -37,11 +38,13 @@ const HILL_SEGMENT = 50;
 const SLOPE_BIAS: Record<BiomeType, number> = {
   vineyard: 0.17, hedge: 0.08, field: -0.02, forest: 0.05, meadow: 0,
   phrygana: 0.14, olive: 0.09, stubble: -0.02, farmstead: 0.02,
+  dunes: 0.04, oasis: -0.03, ruins: 0.03, blackdesert: 0.02,
 };
 /** Rolling resistance (m/s²) of the ground beside the lane. */
 const ROLL_RES: Record<BiomeType, number> = {
   field: 3.6, forest: 1.9, hedge: 2.2, vineyard: 2.0, meadow: 1.9,
   phrygana: 2.4, olive: 2.0, stubble: 2.8, farmstead: 1.9,
+  dunes: 3.4, oasis: 2.2, ruins: 2.4, blackdesert: 2.6,
 };
 const BIOME_WEIGHTS: Record<Landscape, Array<[BiomeType, number]>> = {
   forest: [
@@ -56,6 +59,12 @@ const BIOME_WEIGHTS: Record<Landscape, Array<[BiomeType, number]>> = {
     ['olive', 0.3],
     ['stubble', 0.2],
     ['farmstead', 0.16],
+  ],
+  desert: [
+    ['dunes', 0.36],
+    ['blackdesert', 0.22],
+    ['ruins', 0.22],
+    ['oasis', 0.2],
   ],
 };
 
@@ -271,6 +280,12 @@ export class Terrain {
     h += slope * Math.min(dd, 45);
     h += 0.9 * fbm2(x * 0.07, z * 0.07, s + 21, 3) * smoothstep(1.7, 6, ad);
     h += 6 * fbm2(x * 0.012 + 3, z * 0.012, s + 23, 3) * smoothstep(9, 40, ad);
+    const w = ad > 4 ? landscapeWeight(-z, 'desert') : 0;
+    if (w > 0) {
+      // Sand dunes beside the track: sharp crests across the wind.
+      const ridge = 1 - Math.abs(fbm2(x * 0.03 + 5, z * 0.012, s + 25, 2));
+      h += w * smoothstep(4, 14, ad) * 1.8 * ridge * ridge;
+    }
     const ax = Math.abs(x);
     if (ax > CFG.chunk.halfWidth) {
       // Distant wooded hills rising towards the horizon.
@@ -281,6 +296,11 @@ export class Terrain {
       if (g > 0) {
         const ridge = 1 - Math.abs(fbm2(x * 0.005 + 17, z * 0.004, s + 31, 3));
         h += g * smoothstep(55, 230, far) * (12 + 55 * ridge * ridge + 6 * fbm2(x * 0.03, z * 0.03, s + 33, 2));
+      }
+      // In the desert the hills give way to a sea of large, flat dunes.
+      if (w > 0) {
+        const ridge = 1 - Math.abs(fbm2(x * 0.008 + 41, z * 0.005, s + 35, 2));
+        h += w * (smoothstep(20, 140, far) * 14 * ridge * ridge - far * 0.07 - 6 * fbm2(x * 0.006, z * 0.006 + 9, s + 29, 3) * smoothstep(0, 60, far));
       }
     }
     return h;
@@ -347,6 +367,17 @@ export class Terrain {
     farRockDark: new THREE.Color(0xaaa597),
     farScrub: new THREE.Color(0x6e7a40),
     farGold: new THREE.Color(0xbba766),
+    // The Egyptian desert.
+    sand: new THREE.Color(0xdcb478),
+    sandLight: new THREE.Color(0xe8c993),
+    sandShade: new THREE.Color(0xc79c5e),
+    sandPath: new THREE.Color(0xd2b382),
+    sandPathDark: new THREE.Color(0xbfa070),
+    sandVerge: new THREE.Color(0xd6b27a),
+    basalt: new THREE.Color(0x4a3d34),
+    oasisGrass: new THREE.Color(0x8c9a48),
+    farSand: new THREE.Color(0xdcb070),
+    farSandShade: new THREE.Color(0xc4975a),
   };
 
   private readonly tmpA = new THREE.Color();
@@ -417,6 +448,23 @@ export class Terrain {
         out.copy(P.dryGrass).lerp(P.dryGrassPale, smoothstep(-0.2, 0.4, n) * 0.6);
         return out.lerp(P.scrub, smoothstep(0.3, 0.6, valueNoise2(x * 0.12, z * 0.12, s + 49)) * 0.5);
       }
+      case 'dunes': {
+        // Wind ripples across the sand.
+        const ripple = 0.5 + 0.5 * Math.sin(x * 2.2 + z * 0.9 + 2 * n);
+        return out.copy(P.sand).lerp(P.sandLight, smoothstep(-0.2, 0.5, n) * 0.6).lerp(P.sandShade, ripple * 0.25);
+      }
+      case 'blackdesert': {
+        // Orange sand strewn with dark basalt grit.
+        out.copy(P.sand).lerp(P.sandShade, smoothstep(-0.3, 0.4, n) * 0.6);
+        return out.lerp(P.basalt, smoothstep(0.25, 0.7, valueNoise2(x * 0.2, z * 0.2, s + 55)) * 0.55);
+      }
+      case 'ruins': {
+        return out.copy(P.sandLight).lerp(P.sand, smoothstep(-0.2, 0.4, n) * 0.7);
+      }
+      case 'oasis': {
+        const green = smoothstep(-0.1, 0.4, n) * (1 - smoothstep(14, 30, ad));
+        return out.copy(P.sand).lerp(P.oasisGrass, green * 0.85);
+      }
     }
   }
 
@@ -440,6 +488,7 @@ export class Terrain {
     const ax = Math.abs(x);
     const s = this.seed;
     const g = landscapeWeight(p, 'greece');
+    const w = landscapeWeight(p, 'desert');
 
     if (ax > CFG.chunk.halfWidth - 2) {
       const far = ax - CFG.chunk.halfWidth;
@@ -454,36 +503,41 @@ export class Terrain {
         this.tmpA.lerp(this.tmpB, smoothstep(80, 170, far + 30 * n));
         out.lerp(this.tmpA, g);
       }
+      if (w > 0) {
+        this.tmpA.copy(P.farSand).lerp(P.farSandShade, smoothstep(-0.2, 0.5, v) * 0.7);
+        out.lerp(this.tmpA, w);
+      }
       // Blend into the detailed terrain colour.
       if (far < 0) {
-        const inner = this.groundColorInner(p, d, x, z, mix, g, this.tmpB);
+        const inner = this.groundColorInner(p, d, x, z, mix, g, w, this.tmpB);
         out.lerp(inner, smoothstep(0, -2, far));
       }
     } else {
-      this.groundColorInner(p, d, x, z, mix, g, out);
+      this.groundColorInner(p, d, x, z, mix, g, w, out);
     }
 
-    // Leaf-litter freckles on the track in autumn, pale gravel in Greece.
+    // Leaf-litter freckles on the track in autumn, pale gravel in Greece, light sand in the desert.
     if (ad < 2.4 && hash3(Math.floor(x * 2), Math.floor(z * 2), s + 61) > 0.9) {
-      out.lerp(this.tmpA.setHex(0xb07a3a).lerp(P.dryGrassPale, g), 0.3);
+      out.lerp(this.tmpA.setHex(0xb07a3a).lerp(P.dryGrassPale, g).lerp(P.sandLight, w), 0.3);
     }
     return out;
   }
 
   private readonly vergeTmp = new THREE.Color();
 
-  /** g: weight of the Greek landscape (0..1) for the colours of the track and verge. */
-  private groundColorInner(p: number, d: number, x: number, z: number, mix: BiomeMix, g: number, out: THREE.Color): THREE.Color {
+  /** g, w: weights of the Greek and the desert landscape (0..1) for the colours of the track and verge. */
+  private groundColorInner(p: number, d: number, x: number, z: number, mix: BiomeMix, g: number, w: number, out: THREE.Color): THREE.Color {
     const P = Terrain.PAL;
     const ad = Math.abs(d);
     const s = this.seed;
-    const verge = this.vergeTmp.copy(P.verge).lerp(P.gVerge, g);
+    const verge = this.vergeTmp.copy(P.verge).lerp(P.gVerge, g).lerp(P.sandVerge, w);
     if (ad < CFG.path.halfWidth + 0.35) {
       const rut = Math.exp(-(((ad - CFG.path.rutCenter) / 0.3) ** 2));
       const dirtVar = smoothstep(-0.4, 0.5, valueNoise2(x * 0.5, z * 0.5, s + 31));
       this.tmpA.copy(P.dirt).lerp(P.dirtDark, dirtVar * 0.6);
       if (g > 0) this.tmpA.lerp(this.tmpB.copy(P.gDirt).lerp(P.gDirtDark, dirtVar * 0.6), g);
-      out.copy(P.pathGrass).lerp(P.gPathGrass, g).lerp(this.tmpA, smoothstep(0.25, 0.75, rut));
+      if (w > 0) this.tmpA.lerp(this.tmpB.copy(P.sandPathDark).lerp(P.sandPath, dirtVar * 0.6), w);
+      out.copy(P.pathGrass).lerp(P.gPathGrass, g).lerp(P.sandVerge, w).lerp(this.tmpA, smoothstep(0.25, 0.75, rut));
       // The track fades into the verge.
       out.lerp(verge, smoothstep(CFG.path.halfWidth - 0.3, CFG.path.halfWidth + 0.35, ad));
       return out;
