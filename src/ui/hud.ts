@@ -371,8 +371,11 @@ export class Hud {
     this.overlayContent.innerHTML = `
       <h2>Pause</h2>
       <p>Der Apfel wartet. Das Gewitter auch.</p>
-      <button class="start" data-action="start">Weiter</button>
-      <button class="start secondary" data-action="restart">Neustart</button>
+      <div class="buttons">
+        <button class="start" data-action="start">Weiter</button>
+        <button class="start secondary" data-action="restart">Neustart</button>
+        <button class="start secondary" data-action="menu">Hauptmenü</button>
+      </div>
       <p class="small"><kbd>Enter</kbd> / <kbd>P</kbd> = weiter · <kbd>R</kbd> = Neustart</p>
     `;
   }
