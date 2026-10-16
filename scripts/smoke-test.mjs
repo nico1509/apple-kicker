@@ -569,6 +569,8 @@ try {
     ahead,
   );
   check(offPath < 1, `bottles lie on the path (max ${offPath.toFixed(2)} m off centre)`);
+  const gaps = ahead.slice(1).map((b, k) => ahead[k].z - b.z);
+  check(gaps.length >= 3 && Math.min(...gaps) >= 8 - 0.01 && Math.max(...gaps) <= 28 + 0.01, `bottles are 8–28 m apart (${gaps.map((g) => g.toFixed(1)).join(', ')} m)`);
   const b0 = ahead[0];
   await page.evaluate((b) => {
     const g = window.__appleKicker.game;

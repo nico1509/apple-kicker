@@ -56,7 +56,8 @@ export const CFG = {
     refill: 1, // one bottle fills the bar completely
     warnBelow: 0.25,
     firstBottle: 20, // no bottles on the first metres
-    bottleChance: 0.9, // chance of a bottle per chunk (32 m)
+    minGap: 8, // metres between two bottles along the path, at least ...
+    maxGap: 28, // ... and at most
     hoverHeight: 0.75, // centre of the bottle above the ground
     tilt: 0.35, // radians the floating bottle leans
     pickupRadius: 1.0,
