@@ -199,6 +199,27 @@ export class AudioEngine {
     }
   }
 
+  /** A few rising bubbly blips: a sip of apple spritzer. */
+  drink(): void {
+    if (!this.ctx || !this.master) return;
+    const ctx = this.ctx;
+    const t = ctx.currentTime;
+    for (const [i, f] of [440, 620, 520, 760].entries()) {
+      const t0 = t + i * 0.07;
+      const osc = ctx.createOscillator();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(f, t0);
+      osc.frequency.exponentialRampToValueAtTime(f * 1.8, t0 + 0.06);
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.0001, t0);
+      g.gain.exponentialRampToValueAtTime(0.16, t0 + 0.01);
+      g.gain.exponentialRampToValueAtTime(0.0005, t0 + 0.09);
+      osc.connect(g).connect(this.master);
+      osc.start(t0);
+      osc.stop(t0 + 0.1);
+    }
+  }
+
   gameOver(): void {
     this.thunder(1);
     if (!this.ctx || !this.master) return;

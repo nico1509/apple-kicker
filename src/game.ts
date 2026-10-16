@@ -4,7 +4,7 @@ import { CFG, type Foot } from './config';
 import { Apple } from './entities/apple';
 import { Input } from './entities/input';
 import { Player, type PlayerEvents } from './entities/player';
-import { EASY_LIVES, Hud, type Difficulty } from './ui/hud';
+import { EASY_LIVES, Hud, type Cause, type Difficulty } from './ui/hud';
 import { clamp, lerp, smoothstep } from './utils/math';
 import { Storm } from './weather/storm';
 import { atmosphereAt, createAtmosphere, landscapeAt } from './world/landscape';
@@ -59,6 +59,10 @@ export class Game {
   difficulty: Difficulty = 'easy';
   /** Lives left in the easy mode. */
   lives = EASY_LIVES;
+  /** Thirst bar: 1 = quenched, 0 = parched. */
+  thirst = 1;
+  /** Bottles drunk in this run. */
+  bottles = 0;
   seed: number;
   private readonly playerEvents: PlayerEvents;
   private readonly sun: THREE.DirectionalLight;
@@ -76,6 +80,10 @@ export class Game {
   private tipObstacles = false;
   private tipStorm = false;
   private tipWhiff = false;
+  private thirstWarned = false;
+  private lastCause: Cause = 'player';
+  /** Clock for the spinning bottles. */
+  private animTime = 0;
   private hintFaded = false;
   private indicatorShown = false;
   private pointerLockWanted = false;
@@ -135,6 +143,7 @@ export class Game {
         }
       },
       onFootstep: (sprinting) => this.audio.footstep(sprinting),
+      onExhausted: () => this.hud.message('Aus der Puste! Kurz verschnaufen …', 1300, 'bad'),
     };
 
     this.seed = (Math.random() * 0xffffffff) >>> 0;
@@ -191,6 +200,8 @@ export class Game {
     this.storm.reset();
     this.elapsed = 0;
     this.lives = this.maxLives();
+    this.quench();
+    this.bottles = 0;
     this.tipObstacles = false;
     this.tipStorm = false;
     this.tipWhiff = false;
@@ -198,6 +209,13 @@ export class Game {
     this.player.update(0, this.apple, true);
     this.updateLighting();
     this.hud.setLives(this.lives, this.maxLives());
+  }
+
+  /** Fill the thirst bar completely (start of a run, after a lost life). */
+  private quench(): void {
+    this.thirst = 1;
+    this.thirstWarned = false;
+    this.hud.setThirst(this.thirst, CFG.thirst.warnBelow);
   }
 
   private maxLives(): number {
@@ -318,9 +336,10 @@ export class Game {
     this.requestPointerLock();
   }
 
-  /** The storm caught the player or the apple. In the easy mode this costs a life. */
-  private caught(): void {
+  /** The storm caught the player or the apple, or the thirst bar ran empty. In the easy mode this costs a life. */
+  private caught(cause: Cause): void {
     if (this.state !== 'playing') return;
+    this.lastCause = cause;
     if (this.difficulty === 'easy') {
       this.lives = Math.max(0, this.lives - 1);
       this.hud.setLives(this.lives, this.maxLives());
@@ -328,7 +347,7 @@ export class Game {
         this.state = 'lifelost';
         this.stopPlaying();
         this.audio.gameOver();
-        this.hud.showLifeLost(this.appleTrails(), this.lives, this.maxLives(), this.apple.maxProgress);
+        this.hud.showLifeLost(cause, this.lives, this.maxLives(), this.apple.maxProgress);
         return;
       }
     }
@@ -389,6 +408,7 @@ export class Game {
     this.storm.progress = p - CFG.storm.startBehind;
     // The storm starts slow again, as at the start of a run.
     this.elapsed = 0;
+    this.quench();
     this.tipStorm = false;
     this.tipObstacles = true;
     this.player.update(0, this.apple, true);
@@ -460,7 +480,7 @@ export class Game {
       this.saveBest();
     }
     this.audio.gameOver();
-    this.hud.showGameOver(score, this.best, isRecord, this.appleTrails(), this.maxLives());
+    this.hud.showGameOver(score, this.best, isRecord, this.lastCause, this.maxLives());
   }
 
   private requestPointerLock(): void {
@@ -549,6 +569,8 @@ export class Game {
   update(dt: number): void {
     const playing = this.state === 'playing';
     if (playing) this.elapsed += dt;
+    this.animTime += dt;
+    this.world.bottles.animate(this.animTime);
 
     this.player.update(dt, this.apple, !playing);
     if (playing) {
@@ -567,7 +589,8 @@ export class Game {
     if (playing) {
       // The run is lost when the storm catches the player or the apple.
       const dist = this.storm.distanceTo(this.chasedProgress());
-      if (dist <= 0) this.caught();
+      if (dist <= 0) this.caught(this.appleTrails() ? 'apple' : 'player');
+      this.updateThirst(dt);
       if (!this.hintFaded && this.elapsed >= HINT_SECONDS) {
         this.hintFaded = true;
         this.hud.setHintVisible(false);
@@ -581,6 +604,27 @@ export class Game {
         this.hud.message(this.appleTrails() ? 'Das Gewitter holt deinen Apfel ein – kick ihn weiter!' : 'Das Gewitter holt auf – lauf!', 2500, 'bad');
       }
     }
+  }
+
+  /** The thirst bar drains fast; bottles on the path refill half of it. Empty costs a life. */
+  private updateThirst(dt: number): void {
+    if (this.state !== 'playing') return;
+    const got = this.world.bottles.collect(this.player.pos);
+    if (got > 0) {
+      this.bottles += got;
+      this.thirst = Math.min(1, this.thirst + got * CFG.thirst.refill);
+      this.audio.drink();
+      this.hud.message('Apfelschorle! Ahh …', 1100, 'good');
+    }
+    this.thirst = Math.max(0, this.thirst - dt / CFG.thirst.drainSeconds);
+    if (this.thirst >= CFG.thirst.warnBelow) {
+      this.thirstWarned = false;
+    } else if (!this.thirstWarned && this.thirst > 0) {
+      this.thirstWarned = true;
+      this.hud.message('Durst! Schnapp dir eine Apfelschorle auf dem Weg.', 2400, 'bad');
+    }
+    this.hud.setThirst(this.thirst, CFG.thirst.warnBelow);
+    if (this.thirst <= 0) this.caught('thirst');
   }
 
   /** True when the apple is further back than the player, i.e. the storm reaches it first. */
@@ -630,7 +674,7 @@ export class Game {
     hud.setDistance(this.apple.maxProgress, Math.max(this.best, this.apple.maxProgress));
     const dist = this.storm.distanceTo(this.chasedProgress());
     hud.setStorm(dist, clamp(1 - dist / 110, 0, 1), this.appleTrails());
-    hud.setStamina(this.player.stamina);
+    hud.setStamina(this.player.stamina, this.player.exhausted > 0);
     hud.setVignette(this.storm.intensity * 0.8);
     const drag = this.input.drag;
     if (drag && this.state === 'playing') {
@@ -722,6 +766,17 @@ export class Game {
     this.apple.maxProgress = progress;
     this.storm.progress = progress - CFG.storm.startBehind;
     this.world.prewarm(-progress);
+    this.quench();
+  }
+
+  /** Set the thirst bar (testing only). */
+  debugThirst(v: number): void {
+    this.thirst = clamp(v, 0, 1);
+  }
+
+  /** Bottles still floating in the generated chunks (testing only). */
+  debugBottles(): Array<{ x: number; y: number; z: number }> {
+    return this.world.bottles.positions();
   }
 
   debugLook(yaw: number, pitch: number): void {
@@ -752,6 +807,10 @@ export class Game {
       appleIndicator: this.indicatorShown,
       difficulty: this.difficulty,
       lives: this.lives,
+      stamina: this.player.stamina,
+      exhausted: this.player.exhausted,
+      thirst: this.thirst,
+      bottles: this.bottles,
       playerGroundGap: this.player.pos.y - this.world.groundHeight(this.player.pos.x, this.player.pos.z),
       appleGroundGap: this.apple.pos.y - this.apple.radius - this.world.groundHeight(this.apple.pos.x, this.apple.pos.z),
       playerPathOffset: this.player.pos.x - this.world.terrain.pathCenterX(this.player.progress),

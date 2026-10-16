@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { CFG } from '../config';
+import { Bottles } from './bottles';
 import { ColliderStore } from './colliders';
 import { Decor } from './decor';
 import { Obstacles } from './obstacles';
@@ -10,6 +11,7 @@ interface Chunk {
   far: THREE.Mesh;
   decor: THREE.Group;
   obstacles: THREE.Group;
+  bottles: THREE.Group;
 }
 
 /** Time budget per frame for incremental chunk generation. */
@@ -25,6 +27,7 @@ export class World {
   readonly colliders = new ColliderStore();
   readonly decor: Decor;
   readonly obstacles: Obstacles;
+  readonly bottles: Bottles;
   readonly group = new THREE.Group();
   private readonly chunks = new Map<number, Chunk>();
   private readonly groundMat = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true });
@@ -37,6 +40,7 @@ export class World {
     this.terrain = new Terrain(seed);
     this.decor = new Decor(this.terrain, this.colliders);
     this.obstacles = new Obstacles(this.terrain, this.colliders);
+    this.bottles = new Bottles(this.terrain, this.colliders);
     this.group.name = 'world';
   }
 
@@ -60,8 +64,10 @@ export class World {
     const decor = this.decor.buildChunk(i);
     yield;
     const obstacles = this.obstacles.buildChunk(i);
-    this.group.add(ground, far, decor, obstacles);
-    this.chunks.set(i, { ground, far, decor, obstacles });
+    // After the obstacles so the bottles can keep clear of them.
+    const bottles = this.bottles.buildChunk(i);
+    this.group.add(ground, far, decor, obstacles, bottles);
+    this.chunks.set(i, { ground, far, decor, obstacles, bottles });
     this.generated = Math.max(this.generated, i);
   }
 
@@ -75,11 +81,12 @@ export class World {
   private removeChunk(i: number): void {
     const c = this.chunks.get(i);
     if (!c) return;
-    this.group.remove(c.ground, c.far, c.decor, c.obstacles);
+    this.group.remove(c.ground, c.far, c.decor, c.obstacles, c.bottles);
     c.ground.geometry.dispose();
     c.far.geometry.dispose();
     Decor.disposeGroup(c.decor);
     Obstacles.disposeGroup(c.obstacles);
+    this.bottles.removeChunk(i);
     this.colliders.removeChunk(i);
     this.chunks.delete(i);
   }
@@ -143,6 +150,7 @@ export class World {
     for (const k of [...this.chunks.keys()]) this.removeChunk(k);
     this.decor.dispose();
     this.obstacles.dispose();
+    this.bottles.dispose();
     this.groundMat.dispose();
     this.farMat.dispose();
     this.colliders.clear();

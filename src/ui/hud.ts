@@ -2,11 +2,21 @@ import type { Foot } from '../config';
 
 export type OverlayKind = 'start' | 'paused' | 'lifelost' | 'gameover' | null;
 export type Difficulty = 'easy' | 'hard';
+/** What ended a life: the storm caught the player or the apple, or the thirst bar ran empty. */
+export type Cause = 'player' | 'apple' | 'thirst';
 
 /** Lives in the easy mode. */
 export const EASY_LIVES = 3;
 
 const APPLE_ICON = './favicon.svg';
+/** Small apple-spritzer bottle for the thirst bar. */
+const BOTTLE_ICON = `<svg class="bottle-icon" viewBox="0 0 16 40" aria-hidden="true">
+  <path d="M6 1h4v2l.3 7c3.2 2.4 4.7 4.6 4.7 8V38a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 1 38V18c0-3.4 1.5-5.6 4.7-8L6 3z" fill="#e0a83c"/>
+  <rect x="5.6" y="0" width="4.8" height="2.4" rx="0.6" fill="#2f9a2c"/>
+  <rect x="5.9" y="6" width="4.2" height="2.2" fill="#3fae35"/>
+  <rect x="1" y="21" width="14" height="12" fill="#3aa832"/>
+  <circle cx="5" cy="25" r="2.6" fill="#7ccf4c"/><circle cx="11.5" cy="30" r="2.2" fill="#7ccf4c"/>
+</svg>`;
 
 /** DOM-based heads-up display and menu overlays. */
 export class Hud {
@@ -17,6 +27,8 @@ export class Hud {
   private readonly stormBar: HTMLElement;
   private readonly stormWrap: HTMLElement;
   private readonly staminaBar: HTMLElement;
+  private readonly thirstBar: HTMLElement;
+  private readonly thirstWrap: HTMLElement;
   private readonly messageEl: HTMLElement;
   private readonly arrow: HTMLElement;
   private readonly arrowLine: HTMLElement;
@@ -52,7 +64,13 @@ export class Hud {
     root.innerHTML = `
       <div class="vignette"></div>
       <div class="hud-top">
-        <div class="panel distance"><span class="label">Apfel</span><span class="value" data-distance>0 m</span><span class="best" data-best></span></div>
+        <div class="hud-left">
+          <div class="panel distance"><span class="label">Apfel</span><span class="value" data-distance>0 m</span><span class="best" data-best></span></div>
+          <div class="panel thirst" data-thirst-wrap>
+            ${BOTTLE_ICON}
+            <div class="thirst-body"><span class="label">Durst</span><div class="bar"><div class="fill" data-thirst></div></div></div>
+          </div>
+        </div>
         <div class="lives" data-lives hidden></div>
         <div class="panel storm" data-storm-wrap>
           <span class="label">Gewitter</span>
@@ -88,6 +106,8 @@ export class Hud {
     this.stormBar = q('[data-storm-bar]');
     this.stormWrap = q('[data-storm-wrap]');
     this.staminaBar = q('[data-stamina]');
+    this.thirstBar = q('[data-thirst]');
+    this.thirstWrap = q('[data-thirst-wrap]');
     this.messageEl = q('.message');
     this.arrow = q('.kick-arrow');
     this.arrowLine = q('.kick-arrow .line');
@@ -199,9 +219,16 @@ export class Hud {
     this.stormWrap.classList.toggle('critical', danger > 0.85);
   }
 
-  setStamina(v: number): void {
+  setStamina(v: number, exhausted = false): void {
     this.staminaBar.style.width = `${Math.round(v * 100)}%`;
     this.staminaBar.parentElement?.classList.toggle('low', v < 0.25);
+    this.staminaBar.parentElement?.classList.toggle('exhausted', exhausted);
+  }
+
+  /** Thirst bar: 1 = quenched, 0 = parched (that costs a life). */
+  setThirst(v: number, warnBelow: number): void {
+    this.thirstBar.style.width = `${(Math.max(0, Math.min(1, v)) * 100).toFixed(1)}%`;
+    this.thirstWrap.classList.toggle('low', v < warnBelow);
   }
 
   setVignette(amount: number): void {
@@ -293,6 +320,7 @@ export class Hud {
       <div class="rules">
         <p>Kicke deinen Apfel so weit wie möglich den Weg entlang. Gezählt werden die Meter, die der <b>Apfel</b> zurücklegt.</p>
         <p>Von hinten zieht eine Schlechtwetterfront heran. Holt sie dich oder deinen Apfel ein, kostet das ein Leben.</p>
+        <p>Kicken macht schnell durstig: Sammle die Apfelschorle-Flaschen auf dem Weg ein. Ist die Durst-Anzeige leer, kostet das ebenfalls ein Leben.</p>
         <p>Wurzeln, Äste, Steine, Pfützen und Hügel werden mit der Zeit mehr – kick fester oder lupf drüber.</p>
       </div>
       <div class="difficulty" role="radiogroup" aria-label="Schwierigkeit">
@@ -337,14 +365,19 @@ export class Hud {
     `;
   }
 
-  /** Easy mode: the storm took a life but at least one is left. */
-  showLifeLost(apple: boolean, left: number, total: number, score: number): void {
+  private static causeText(cause: Cause): string {
+    if (cause === 'thirst') return 'Du bist verdurstet. Unterwegs liegt Apfelschorle!';
+    return cause === 'apple' ? 'Das Gewitter hat deinen Apfel eingeholt.' : 'Das Gewitter hat dich eingeholt.';
+  }
+
+  /** Easy mode: the storm (or the thirst) took a life but at least one is left. */
+  showLifeLost(cause: Cause, left: number, total: number, score: number): void {
     this.overlayKind = 'lifelost';
     this.overlay.hidden = false;
     this.overlay.scrollTop = 0;
     this.overlayContent.innerHTML = `
       <h2>Ein Leben verloren!</h2>
-      <p>${apple ? 'Das Gewitter hat deinen Apfel eingeholt.' : 'Das Gewitter hat dich eingeholt.'}</p>
+      <p>${Hud.causeText(cause)}</p>
       <div class="lives big" aria-label="${left} von ${total} Leben">${Hud.livesHtml(left, total)}</div>
       <p>${left === 1 ? 'Noch <b>1 Leben</b>' : `Noch <b>${left} Leben</b>`} · dein Apfel ist bei <b>${Math.floor(score)} m</b>.</p>
       <button class="start" data-action="continue">Weitermachen</button>
@@ -354,13 +387,13 @@ export class Hud {
   }
 
   /** `livesTotal` > 0 marks the easy mode (lives shown, Kickstart offered). */
-  showGameOver(score: number, best: number, isRecord: boolean, apple: boolean, livesTotal = 0): void {
+  showGameOver(score: number, best: number, isRecord: boolean, cause: Cause, livesTotal = 0): void {
     this.overlayKind = 'gameover';
     this.overlay.hidden = false;
     this.overlay.scrollTop = 0;
     this.armedAt = performance.now() + 700;
     this.overlayContent.innerHTML = `
-      <h2>${apple ? 'Das Gewitter hat deinen Apfel eingeholt!' : 'Vom Gewitter eingeholt!'}</h2>
+      <h2>${cause === 'thirst' ? 'Verdurstet!' : cause === 'apple' ? 'Das Gewitter hat deinen Apfel eingeholt!' : 'Vom Gewitter eingeholt!'}</h2>
       ${livesTotal > 0 ? `<div class="lives big" aria-label="Keine Leben mehr">${Hud.livesHtml(0, livesTotal)}</div><p>Alle Leben sind verbraucht.</p>` : ''}
       <p class="score">Dein Apfel kam <b>${Math.floor(score)} m</b> weit.</p>
       ${isRecord ? '<p class="record">Neuer Rekord!</p>' : `<p>Rekord: <b>${Math.floor(best)} m</b></p>`}
