@@ -4,14 +4,15 @@ import { CFG, type Foot } from './config';
 import { Apple } from './entities/apple';
 import { Input } from './entities/input';
 import { Player, type PlayerEvents } from './entities/player';
-import { Hud } from './ui/hud';
+import { EASY_LIVES, Hud, type Difficulty } from './ui/hud';
 import { clamp, lerp, smoothstep } from './utils/math';
 import { Storm } from './weather/storm';
 import { atmosphereAt, createAtmosphere, landscapeAt } from './world/landscape';
 import { Sky } from './world/sky';
+import { sphereContact, type Contact } from './world/colliders';
 import { World } from './world/world';
 
-export type GameState = 'menu' | 'playing' | 'paused' | 'over';
+export type GameState = 'menu' | 'playing' | 'paused' | 'lifelost' | 'over';
 export type Quality = 'low' | 'medium' | 'high';
 
 /** Quality from the URL (?quality=low|medium|high), defaulting to high. */
@@ -25,7 +26,11 @@ export function detectQuality(): Quality {
   return 'high';
 }
 
-const BEST_KEY = 'apple-kicker-best';
+/** Hard keeps the original key so existing records stay. */
+const BEST_KEYS: Record<Difficulty, string> = { hard: 'apple-kicker-best', easy: 'apple-kicker-best-easy' };
+const DIFFICULTY_KEY = 'apple-kicker-difficulty';
+/** The apple lies this far ahead of the player at the start and after a respawn. */
+const APPLE_AHEAD = 1.2;
 const HINT_SECONDS = 25;
 const SUN_DIR = new THREE.Vector3(0.55, 0.62, -0.5).normalize();
 const HORIZON_STORM = new THREE.Color(0x5f666f);
@@ -50,6 +55,10 @@ export class Game {
   state: GameState = 'menu';
   elapsed = 0;
   best = 0;
+  bests: Record<Difficulty, number> = { easy: 0, hard: 0 };
+  difficulty: Difficulty = 'easy';
+  /** Lives left in the easy mode. */
+  lives = EASY_LIVES;
   seed: number;
   private readonly playerEvents: PlayerEvents;
   private readonly sun: THREE.DirectionalLight;
@@ -63,6 +72,7 @@ export class Game {
   manualStepping = false;
   private readonly tmp = new THREE.Vector3();
   private readonly tmp2 = new THREE.Vector3();
+  private readonly contact: Contact = { nx: 0, ny: 0, nz: 0, depth: 0, surface: { restitution: 0, friction: 0 } };
   private tipObstacles = false;
   private tipStorm = false;
   private tipWhiff = false;
@@ -132,15 +142,27 @@ export class Game {
     this.scene.add(this.world.group);
     this.createEntities();
 
-    this.best = this.loadBest();
+    this.bests = { easy: this.loadBest('easy'), hard: this.loadBest('hard') };
+    this.difficulty = this.loadDifficulty();
+    this.best = this.bests[this.difficulty];
     this.hud.onStart(() => this.onOverlayClick());
     this.hud.onRestart(() => {
       this.audio.init();
       this.restart();
     });
+    this.hud.onContinue(() => {
+      this.audio.init();
+      this.continueRun();
+    });
+    this.hud.onMenu(() => this.toMenu());
+    this.hud.onKickstart(() => {
+      this.audio.init();
+      this.kickstart();
+    });
+    this.hud.onDifficulty((d) => this.setDifficulty(d));
     this.hud.setDistance(0, this.best);
     this.setupWorld();
-    this.hud.showStart(this.best);
+    this.hud.showStart(this.bests, this.difficulty);
 
     window.addEventListener('resize', this.onResize);
     window.addEventListener('blur', this.onBlur);
@@ -165,15 +187,21 @@ export class Game {
   private setupWorld(): void {
     this.world.prewarm(0);
     this.player.reset(this.world.terrain.pathCenterX(0), 0, 0);
-    this.apple.reset(this.world.terrain.pathCenterX(1.2), -1.2);
+    this.apple.reset(this.world.terrain.pathCenterX(APPLE_AHEAD), -APPLE_AHEAD);
     this.storm.reset();
     this.elapsed = 0;
+    this.lives = this.maxLives();
     this.tipObstacles = false;
     this.tipStorm = false;
     this.tipWhiff = false;
     this.hintFaded = false;
     this.player.update(0, this.apple, true);
     this.updateLighting();
+    this.hud.setLives(this.lives, this.maxLives());
+  }
+
+  private maxLives(): number {
+    return this.difficulty === 'easy' ? EASY_LIVES : 0;
   }
 
   private rebuildWorld(): void {
@@ -189,9 +217,9 @@ export class Game {
     this.onResize();
   }
 
-  private loadBest(): number {
+  private loadBest(d: Difficulty): number {
     try {
-      const v = Number(localStorage.getItem(BEST_KEY) ?? '0');
+      const v = Number(localStorage.getItem(BEST_KEYS[d]) ?? '0');
       return Number.isFinite(v) ? v : 0;
     } catch {
       return 0;
@@ -199,8 +227,32 @@ export class Game {
   }
 
   private saveBest(): void {
+    this.bests[this.difficulty] = this.best;
     try {
-      localStorage.setItem(BEST_KEY, String(Math.floor(this.best)));
+      localStorage.setItem(BEST_KEYS[this.difficulty], String(Math.floor(this.best)));
+    } catch {
+      /* storage may be unavailable */
+    }
+  }
+
+  private loadDifficulty(): Difficulty {
+    try {
+      return localStorage.getItem(DIFFICULTY_KEY) === 'hard' ? 'hard' : 'easy';
+    } catch {
+      return 'easy';
+    }
+  }
+
+  /** Choose the difficulty (only in the menu, before a run starts). */
+  setDifficulty(d: Difficulty): void {
+    if (this.state !== 'menu') return;
+    this.difficulty = d;
+    this.best = this.bests[d];
+    this.lives = this.maxLives();
+    this.hud.setLives(this.lives, this.maxLives());
+    this.hud.setDistance(0, this.best);
+    try {
+      localStorage.setItem(DIFFICULTY_KEY, d);
     } catch {
       /* storage may be unavailable */
     }
@@ -210,12 +262,17 @@ export class Game {
     this.audio.init();
     if (this.state === 'menu') this.start();
     else if (this.state === 'paused') this.resume();
+    else if (this.state === 'lifelost') this.continueRun();
     else if (this.state === 'over') this.restart();
   }
 
   /** Begin playing from the menu. Pointer lock is requested but not required. */
   start(): void {
     if (this.state === 'playing') return;
+    if (this.state === 'menu') {
+      this.lives = this.maxLives();
+      this.hud.setLives(this.lives, this.maxLives());
+    }
     this.state = 'playing';
     this.hud.hideOverlay();
     this.hud.setHintVisible(true);
@@ -231,6 +288,14 @@ export class Game {
     this.rebuildWorld();
     this.state = 'menu';
     this.start();
+  }
+
+  /** Back to the start menu with a fresh world, e.g. to change the difficulty. */
+  toMenu(): void {
+    this.stopPlaying();
+    this.rebuildWorld();
+    this.state = 'menu';
+    this.hud.showStart(this.bests, this.difficulty);
   }
 
   pause(): void {
@@ -253,13 +318,141 @@ export class Game {
     this.requestPointerLock();
   }
 
-  private gameOver(): void {
+  /** The storm caught the player or the apple. In the easy mode this costs a life. */
+  private caught(): void {
     if (this.state !== 'playing') return;
-    this.state = 'over';
+    if (this.difficulty === 'easy') {
+      this.lives = Math.max(0, this.lives - 1);
+      this.hud.setLives(this.lives, this.maxLives());
+      if (this.lives > 0) {
+        this.state = 'lifelost';
+        this.stopPlaying();
+        this.audio.gameOver();
+        this.hud.showLifeLost(this.appleTrails(), this.lives, this.maxLives(), this.apple.maxProgress);
+        return;
+      }
+    }
+    this.gameOver();
+  }
+
+  private stopPlaying(): void {
     this.input.cancelDrag();
     this.input.enabled = false;
     this.hud.clearDrag();
     this.hud.setAppleIndicator(false, 0, 0, 0, 0);
+    this.pointerLockWanted = false;
+    if (document.pointerLockElement === this.canvas) document.exitPointerLock();
+  }
+
+  /**
+   * Continue after a lost life: player, apple and storm are placed on the path
+   * as at the start of a run, but at the distance the apple has reached so far.
+   */
+  continueRun(): void {
+    if (this.state !== 'lifelost') return;
+    const reached = this.apple.maxProgress;
+    this.placeRunAt(reached);
+    this.state = 'playing';
+    this.hud.hideOverlay();
+    this.audio.chime();
+    this.requestPointerLock();
+    this.input.cancelDrag();
+    this.input.enabled = true;
+    this.hud.message(`Weiter geht's bei ${Math.floor(reached)} m!`, 2400, 'good');
+  }
+
+  /**
+   * Easy mode only: a fresh run with all lives that starts right at the
+   * easy record instead of at 0 m.
+   */
+  kickstart(): void {
+    const record = this.bests.easy;
+    if (this.difficulty !== 'easy' || record < 1) return;
+    if (this.state === 'playing') return;
+    this.input.cancelDrag();
+    this.rebuildWorld();
+    this.state = 'menu';
+    this.placeRunAt(record);
+    this.start();
+    this.hud.message(`Kickstart bei ${Math.floor(record)} m!`, 2400, 'good');
+  }
+
+  /**
+   * Player, apple and storm as at the start of a run, but `reached` metres down
+   * the path; the distance counts from there.
+   */
+  private placeRunAt(reached: number): void {
+    const p = this.respawnProgress(reached);
+    this.placeOnPath(p);
+    this.apple.maxProgress = reached;
+    this.storm.reset();
+    this.storm.progress = p - CFG.storm.startBehind;
+    // The storm starts slow again, as at the start of a run.
+    this.elapsed = 0;
+    this.tipStorm = false;
+    this.tipObstacles = true;
+    this.player.update(0, this.apple, true);
+    this.updateLighting();
+  }
+
+  /** Player on the path centre at progress p, the apple just ahead, facing it. */
+  private placeOnPath(p: number): void {
+    const t = this.world.terrain;
+    this.world.prewarm(-p);
+    const px = t.pathCenterX(p);
+    const ax = t.pathCenterX(p + APPLE_AHEAD);
+    this.player.reset(px, -p, Math.atan2(-(ax - px), APPLE_AHEAD));
+    this.apple.reset(ax, -(p + APPLE_AHEAD));
+  }
+
+  /**
+   * A spot near `target` where player and apple stand on a flat bit of the
+   * path, clear of obstacles and puddles. Searches backwards first so the run
+   * never gains free metres.
+   */
+  respawnProgress(target: number): number {
+    this.world.prewarm(-target);
+    const base = Math.max(0, Math.floor(target * 2) / 2);
+    for (let i = 0; i <= 80; i++) {
+      const p = base - i * 0.5;
+      if (p < 0) break;
+      if (this.respawnClear(p)) return p;
+    }
+    for (let i = 1; i <= 40; i++) {
+      const p = base + i * 0.5;
+      if (this.respawnClear(p)) return p;
+    }
+    return base;
+  }
+
+  /** True when the stretch of path from just behind the player to past the apple is free. */
+  respawnClear(p: number): boolean {
+    const t = this.world.terrain;
+    if (Math.abs(t.pathSlope(p)) > 0.08 || Math.abs(t.pathSlope(p + APPLE_AHEAD)) > 0.08) return false;
+    for (let q = p - 1; q <= p + APPLE_AHEAD + 1.5; q += 0.25) {
+      const x = t.pathCenterX(q);
+      const z = -q;
+      if (this.world.rollingResistance(x, z) > t.rollingResistance(x, z)) return false;
+      const gy = this.world.groundHeight(x, z);
+      let hit = false;
+      this.world.colliders.forEachNear(z, (col) => {
+        if (hit) return;
+        for (const h of [0.15, 0.6, 1.2]) {
+          if (sphereContact(col, x, gy + h, z, 0.7, this.contact)) {
+            hit = true;
+            return;
+          }
+        }
+      });
+      if (hit) return false;
+    }
+    return true;
+  }
+
+  private gameOver(): void {
+    if (this.state !== 'playing') return;
+    this.state = 'over';
+    this.stopPlaying();
     const score = this.apple.maxProgress;
     const isRecord = score > this.best;
     if (isRecord) {
@@ -267,9 +460,7 @@ export class Game {
       this.saveBest();
     }
     this.audio.gameOver();
-    this.hud.showGameOver(score, this.best, isRecord, this.appleTrails());
-    this.pointerLockWanted = false;
-    if (document.pointerLockElement === this.canvas) document.exitPointerLock();
+    this.hud.showGameOver(score, this.best, isRecord, this.appleTrails(), this.maxLives());
   }
 
   private requestPointerLock(): void {
@@ -302,6 +493,14 @@ export class Game {
     }
     if (this.state === 'paused') {
       if (e.code === 'KeyP' || e.code === 'Enter' || e.code === 'NumpadEnter') this.onOverlayClick();
+      else if (e.code === 'KeyR') {
+        this.audio.init();
+        this.restart();
+      }
+      return;
+    }
+    if (this.state === 'lifelost') {
+      if (e.code === 'Enter' || e.code === 'NumpadEnter') this.onOverlayClick();
       else if (e.code === 'KeyR') {
         this.audio.init();
         this.restart();
@@ -368,7 +567,7 @@ export class Game {
     if (playing) {
       // The run is lost when the storm catches the player or the apple.
       const dist = this.storm.distanceTo(this.chasedProgress());
-      if (dist <= 0) this.gameOver();
+      if (dist <= 0) this.caught();
       if (!this.hintFaded && this.elapsed >= HINT_SECONDS) {
         this.hintFaded = true;
         this.hud.setHintVisible(false);
@@ -551,6 +750,12 @@ export class Game {
       stormAppleDistance: this.storm.distanceTo(this.apple.progress),
       stormPlayerDistance: this.storm.distanceTo(this.player.progress),
       appleIndicator: this.indicatorShown,
+      difficulty: this.difficulty,
+      lives: this.lives,
+      playerGroundGap: this.player.pos.y - this.world.groundHeight(this.player.pos.x, this.player.pos.z),
+      appleGroundGap: this.apple.pos.y - this.apple.radius - this.world.groundHeight(this.apple.pos.x, this.apple.pos.z),
+      playerPathOffset: this.player.pos.x - this.world.terrain.pathCenterX(this.player.progress),
+      best: this.best,
       stormSpeed: this.storm.speed,
       pathAheadX: this.world.terrain.pathCenterX(this.apple.progress + 12),
       chunks: this.world.generated,

@@ -83,6 +83,13 @@ const state = () => page.evaluate(() => window.__appleKicker.state());
 const simulate = (seconds, keys = []) => page.evaluate(([s, k]) => window.__appleKicker.simulate(s, k), [seconds, keys]);
 const kick = (dx, dy, foot, chip = false) => page.evaluate(([a, b, f, c]) => window.__appleKicker.kick(a, b, f, c), [dx, dy, foot, chip]);
 const look = (yaw, pitch) => page.evaluate(([y, p]) => window.__appleKicker.look(y, p), [yaw, pitch]);
+/** Real mouse click in the middle of an overlay element. */
+const clickEl = async (sel) => {
+  const el = await page.waitForSelector(sel, { state: 'visible' });
+  await el.scrollIntoViewIfNeeded();
+  const b = await el.boundingBox();
+  await page.mouse.click(b.x + b.width / 2, b.y + b.height / 2);
+};
 const shot = (name) => page.screenshot({ path: path.join(shots, name) });
 
 const wrap = (a) => ((a + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
@@ -138,6 +145,11 @@ try {
   const s0 = await state();
   check(s0.state === 'menu', 'game boots into the menu');
   check(s0.chunks >= 5, `initial chunks generated (${s0.chunks})`);
+  check(s0.difficulty === 'easy' && s0.lives === 3, `easy with 3 lives is the default (${s0.difficulty}, ${s0.lives})`);
+  // The gameplay checks below run in the hard mode (one life, as before).
+  await clickEl('[data-difficulty="hard"]');
+  check((await state()).difficulty === 'hard', 'clicking "Schwer" selects the hard mode');
+  check((await state()).state === 'menu', 'choosing a difficulty does not start the game');
 
   await page.evaluate(() => window.__appleKicker.start());
   await sleep(100);
@@ -274,6 +286,99 @@ try {
   await simulate(0.2);
   const s4 = await state();
   check(s4.state === 'playing' && s4.appleMax < 1, 'restart creates a fresh run');
+
+  // Easy mode: three lives, continue at the distance reached, on the path.
+  await page.evaluate(() => window.__appleKicker.game.toMenu());
+  await clickEl('[data-difficulty="easy"]');
+  await shot('07-menu-easy.png');
+  await page.evaluate(() => window.__appleKicker.start());
+  await simulate(0.2);
+  const e0 = await state();
+  check(e0.state === 'playing' && e0.difficulty === 'easy' && e0.lives === 3, `easy run starts with 3 lives (${e0.difficulty}, ${e0.lives})`);
+  const catchPlayer = () =>
+    page.evaluate(() => {
+      const g = window.__appleKicker.game;
+      g.storm.progress = g.player.progress - 0.5;
+    });
+  // Reached distance where an obstacle lies on the path, so the respawn has to dodge it.
+  const blocked = await page.evaluate(() => {
+    const g = window.__appleKicker.game;
+    for (let p = 1240; p < 1400; p += 0.5) {
+      g.debugTeleport(p);
+      if (!g.respawnClear(p)) return p;
+    }
+    return 1240;
+  });
+  await page.evaluate((p) => window.__appleKicker.teleport(p), blocked);
+  await simulate(0.2);
+  await catchPlayer();
+  await simulate(0.5);
+  const e1 = await state();
+  await shot('08-life-lost.png');
+  check(e1.state === 'lifelost' && e1.lives === 2, `storm takes a life in the easy mode (${e1.state}, ${e1.lives} left)`);
+  await simulate(2);
+  check((await state()).stormProgress === e1.stormProgress, 'the storm waits while the life-lost panel is open');
+  await clickEl('[data-action="continue"]');
+  await simulate(0.05);
+  const e2 = await state();
+  await look(e2.playerYaw, -0.3);
+  await simulate(0.05);
+  await shot('09-continue.png');
+  const clear = await page.evaluate(() => window.__appleKicker.game.respawnClear(window.__appleKicker.game.player.progress));
+  check(e2.state === 'playing' && e2.lives === 2, `"Weitermachen" continues the run (${e2.state})`);
+  check(e2.appleMax === e1.appleMax, `distance reached is kept (${e2.appleMax.toFixed(1)} m)`);
+  const pp = -e2.playerZ;
+  check(pp <= blocked && pp > blocked - 40, `respawn is at the distance reached (${blocked} m → ${pp.toFixed(1)} m)`);
+  check(clear, 'respawn spot is clear of obstacles');
+  check(Math.abs(e2.playerGroundGap) < 0.02 && Math.abs(e2.appleGroundGap) < 0.02, `player and apple stand on the ground (${e2.playerGroundGap.toFixed(3)}, ${e2.appleGroundGap.toFixed(3)})`);
+  check(Math.abs(e2.playerPathOffset) < 0.05, `player stands on the path (${e2.playerPathOffset.toFixed(2)} m off centre)`);
+  check(Math.abs(e2.stormPlayerDistance - 58) < 1, `storm is placed behind as at the start (${e2.stormPlayerDistance.toFixed(1)} m)`);
+  await simulate(1.5);
+  const e3 = await state();
+  check(e3.state === 'playing' && Math.abs(e3.playerGroundGap) < 0.02 && Math.abs(e3.appleProgress - e2.appleProgress) < 0.3, `nothing falls or rolls away after the respawn (apple ${e2.appleProgress.toFixed(2)} → ${e3.appleProgress.toFixed(2)})`);
+  const r3 = await walkAndKick('right', 300, 0);
+  check(r3.after.appleProgress > e2.appleProgress + 5, `apple can be kicked on after the respawn (${r3.after.appleProgress.toFixed(1)} m)`);
+  // Second life lost, then the last one ends the run.
+  await catchPlayer();
+  await simulate(0.5);
+  check((await state()).lives === 1, 'second catch leaves one life');
+  await page.keyboard.press('Enter');
+  await simulate(0.1);
+  check((await state()).state === 'playing', 'Enter continues');
+  await catchPlayer();
+  await simulate(0.5);
+  const e4 = await state();
+  await shot('10-easy-over.png');
+  check(e4.state === 'over' && e4.lives === 0, `losing the last life ends the run (${e4.state})`);
+
+  // Kickstart (easy only): a fresh run that starts at the easy record.
+  const rec = e4.best;
+  check(rec >= e2.appleMax, `easy record is saved (${rec.toFixed(0)} m)`);
+  await clickEl('[data-action="kickstart"]');
+  await simulate(0.1);
+  const k0 = await state();
+  await look(k0.playerYaw, -0.3);
+  await simulate(0.05);
+  await shot('11-kickstart.png');
+  check(k0.state === 'playing' && k0.lives === 3, `Kickstart starts a run with all lives (${k0.state}, ${k0.lives})`);
+  check(Math.abs(k0.appleMax - rec) < 1e-6 && -k0.playerZ <= rec && -k0.playerZ > rec - 40, `Kickstart starts at the record (${rec.toFixed(1)} m → player at ${(-k0.playerZ).toFixed(1)} m)`);
+  check(Math.abs(k0.playerGroundGap) < 0.02 && Math.abs(k0.playerPathOffset) < 0.05, 'Kickstart puts the player on the path');
+  await page.evaluate(() => window.__appleKicker.game.pause());
+  await clickEl('[data-action="restart"]');
+  await simulate(0.1);
+  check((await state()).appleMax < 1, 'restart from the pause menu begins at 0 m again');
+  await page.evaluate(() => window.__appleKicker.game.pause());
+  await page.evaluate(() => window.__appleKicker.game.toMenu());
+  await clickEl('[data-difficulty="hard"]');
+  check(await page.isHidden('[data-action="kickstart"]'), 'Kickstart is not offered in the hard mode');
+  await clickEl('[data-difficulty="easy"]');
+  check(await page.isVisible('[data-action="kickstart"]'), 'Kickstart is offered in the easy mode once there is a record');
+  await shot('12-menu-kickstart.png');
+  await page.evaluate(() => window.__appleKicker.start());
+  await page.evaluate(() => window.__appleKicker.start());
+  await simulate(0.2);
+  const e5 = await state();
+  check(e5.state === 'playing' && e5.lives === 3 && e5.appleMax < 1, 'restart gives all lives back');
 
   // Frame rate estimate (software rendering, so only a rough sanity figure).
   const fps = await page.evaluate(

@@ -1,6 +1,12 @@
 import type { Foot } from '../config';
 
-export type OverlayKind = 'start' | 'paused' | 'gameover' | null;
+export type OverlayKind = 'start' | 'paused' | 'lifelost' | 'gameover' | null;
+export type Difficulty = 'easy' | 'hard';
+
+/** Lives in the easy mode. */
+export const EASY_LIVES = 3;
+
+const APPLE_ICON = './favicon.svg';
 
 /** DOM-based heads-up display and menu overlays. */
 export class Hud {
@@ -23,9 +29,15 @@ export class Hud {
   private readonly overlayContent: HTMLElement;
   private readonly vignette: HTMLElement;
   private readonly hint: HTMLElement;
+  private readonly livesEl: HTMLElement;
   private messageTimer: number | null = null;
   private startHandler: (() => void) | null = null;
   private restartHandler: (() => void) | null = null;
+  private continueHandler: (() => void) | null = null;
+  private menuHandler: (() => void) | null = null;
+  private difficultyHandler: ((d: Difficulty) => void) | null = null;
+  private kickstartHandler: (() => void) | null = null;
+  private lastLives = '';
   /** The game-over panel ignores clicks for a moment so the score can be read. */
   private armedAt = 0;
   private lastDistance = '';
@@ -41,6 +53,7 @@ export class Hud {
       <div class="vignette"></div>
       <div class="hud-top">
         <div class="panel distance"><span class="label">Apfel</span><span class="value" data-distance>0 m</span><span class="best" data-best></span></div>
+        <div class="lives" data-lives hidden></div>
         <div class="panel storm" data-storm-wrap>
           <span class="label">Gewitter</span>
           <span class="value" data-storm>– m</span>
@@ -87,13 +100,35 @@ export class Hud {
     this.overlayContent = q('.overlay-content');
     this.vignette = q('.vignette');
     this.hint = q('.hint');
+    this.livesEl = q('[data-lives]');
     this.overlay.addEventListener('click', (e) => {
       if (this.overlayKind === null) return;
       const target = e.target as HTMLElement;
+      const choice = target.closest<HTMLElement>('[data-difficulty]');
+      if (choice) {
+        const d = choice.dataset.difficulty === 'hard' ? 'hard' : 'easy';
+        this.selectDifficulty(d);
+        this.difficultyHandler?.(d);
+        return;
+      }
       if (target.closest('[data-action="restart"]')) {
         this.restartHandler?.();
         return;
       }
+      if (target.closest('[data-action="kickstart"]')) {
+        this.kickstartHandler?.();
+        return;
+      }
+      if (target.closest('[data-action="continue"]')) {
+        this.continueHandler?.();
+        return;
+      }
+      if (target.closest('[data-action="menu"]')) {
+        this.menuHandler?.();
+        return;
+      }
+      // After losing a life only the buttons count: a stray click must not decide.
+      if (this.overlayKind === 'lifelost') return;
       if (this.overlayKind === 'gameover' && performance.now() < this.armedAt) return;
       this.startHandler?.();
     });
@@ -105,6 +140,38 @@ export class Hud {
 
   onRestart(cb: () => void): void {
     this.restartHandler = cb;
+  }
+
+  onContinue(cb: () => void): void {
+    this.continueHandler = cb;
+  }
+
+  onMenu(cb: () => void): void {
+    this.menuHandler = cb;
+  }
+
+  onKickstart(cb: () => void): void {
+    this.kickstartHandler = cb;
+  }
+
+  onDifficulty(cb: (d: Difficulty) => void): void {
+    this.difficultyHandler = cb;
+  }
+
+  /** Lives as apple icons; hidden when `total` is 0 (hard mode). */
+  setLives(left: number, total: number): void {
+    const key = `${left}/${total}`;
+    if (key === this.lastLives) return;
+    this.lastLives = key;
+    this.livesEl.hidden = total === 0;
+    this.livesEl.innerHTML = Hud.livesHtml(left, total);
+    this.livesEl.setAttribute('aria-label', `${left} von ${total} Leben`);
+  }
+
+  private static livesHtml(left: number, total: number): string {
+    let html = '';
+    for (let i = 0; i < total; i++) html += `<img class="life${i < left ? '' : ' lost'}" src="${APPLE_ICON}" alt="" />`;
+    return html;
   }
 
   setDistance(m: number, best: number): void {
@@ -193,9 +260,30 @@ export class Hud {
     this.indicatorLabel.textContent = `Apfel ${Math.round(distance)} m`;
   }
 
-  showStart(best: number): void {
+  private selectDifficulty(d: Difficulty): void {
+    for (const el of this.overlayContent.querySelectorAll<HTMLElement>('[data-difficulty]')) {
+      const on = el.dataset.difficulty === d;
+      el.classList.toggle('selected', on);
+      el.setAttribute('aria-checked', String(on));
+    }
+    const kick = this.overlayContent.querySelector<HTMLElement>('[data-action="kickstart"]');
+    if (kick) kick.hidden = d !== 'easy';
+  }
+
+  /** "Kickstart" button: start an easy run right at the record distance. */
+  private static kickstartHtml(record: number, hidden = false): string {
+    if (record < 1) return '';
+    return `<button class="start secondary" data-action="kickstart"${hidden ? ' hidden' : ''}>Kickstart bei ${Math.floor(record)} m</button>`;
+  }
+
+  private static recordHtml(best: number): string {
+    return `<span class="choice-record">${best > 0 ? `Rekord <b>${Math.floor(best)} m</b>` : 'Noch kein Rekord'}</span>`;
+  }
+
+  showStart(bests: Record<Difficulty, number>, difficulty: Difficulty): void {
     this.overlayKind = 'start';
     this.overlay.hidden = false;
+    this.overlay.scrollTop = 0;
     this.overlayContent.innerHTML = `
       <h1 class="logo" aria-label="Apple Kicker">
         <img class="logo-apple" src="./favicon.svg" alt="" />
@@ -204,8 +292,24 @@ export class Hud {
       <p class="tagline">Goldener Oktober, ein Apfel, ein Feldweg – und ein Gewitter im Nacken.</p>
       <div class="rules">
         <p>Kicke deinen Apfel so weit wie möglich den Weg entlang. Gezählt werden die Meter, die der <b>Apfel</b> zurücklegt.</p>
-        <p>Von hinten zieht eine Schlechtwetterfront heran. Holt sie dich ein, ist der Lauf vorbei.</p>
+        <p>Von hinten zieht eine Schlechtwetterfront heran. Holt sie dich oder deinen Apfel ein, kostet das ein Leben.</p>
         <p>Wurzeln, Äste, Steine, Pfützen und Hügel werden mit der Zeit mehr – kick fester oder lupf drüber.</p>
+      </div>
+      <div class="difficulty" role="radiogroup" aria-label="Schwierigkeit">
+        <button class="choice" role="radio" data-difficulty="easy">
+          <span class="choice-head"><span class="choice-title">Einfach</span><span class="choice-lives">${Hud.livesHtml(EASY_LIVES, EASY_LIVES)}</span></span>
+          <span class="choice-text">3 Leben, danach geht es an der erreichten Stelle weiter</span>
+          ${Hud.recordHtml(bests.easy)}
+        </button>
+        <button class="choice" role="radio" data-difficulty="hard">
+          <span class="choice-head"><span class="choice-title">Schwer</span><span class="choice-lives">${Hud.livesHtml(1, 1)}</span></span>
+          <span class="choice-text">Ein Leben, eingeholt ist vorbei</span>
+          ${Hud.recordHtml(bests.hard)}
+        </button>
+      </div>
+      <div class="buttons">
+        <button class="start" data-action="start">Klicken zum Starten</button>
+        ${Hud.kickstartHtml(bests.easy)}
       </div>
       <div class="controls">
         <div><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> laufen · <kbd>Shift</kbd> sprinten</div>
@@ -215,15 +319,15 @@ export class Hud {
         <div><kbd>Leertaste</kbd> beim Loslassen halten = hoher Lupfer über Hindernisse</div>
         <div><kbd>Q</kbd> / <kbd>E</kbd> = kurzer Stupser links / rechts · <kbd>M</kbd> Ton an/aus</div>
       </div>
-      ${best > 0 ? `<p class="best-line">Dein Rekord: <b>${Math.floor(best)} m</b></p>` : ''}
-      <button class="start" data-action="start">Klicken zum Starten</button>
       <p class="small">Der Mauszeiger wird im Spiel eingefangen · <kbd>Esc</kbd> oder <kbd>P</kbd> pausiert</p>
     `;
+    this.selectDifficulty(difficulty);
   }
 
   showPaused(): void {
     this.overlayKind = 'paused';
     this.overlay.hidden = false;
+    this.overlay.scrollTop = 0;
     this.overlayContent.innerHTML = `
       <h2>Pause</h2>
       <p>Der Apfel wartet. Das Gewitter auch.</p>
@@ -233,15 +337,38 @@ export class Hud {
     `;
   }
 
-  showGameOver(score: number, best: number, isRecord: boolean, apple: boolean): void {
+  /** Easy mode: the storm took a life but at least one is left. */
+  showLifeLost(apple: boolean, left: number, total: number, score: number): void {
+    this.overlayKind = 'lifelost';
+    this.overlay.hidden = false;
+    this.overlay.scrollTop = 0;
+    this.overlayContent.innerHTML = `
+      <h2>Ein Leben verloren!</h2>
+      <p>${apple ? 'Das Gewitter hat deinen Apfel eingeholt.' : 'Das Gewitter hat dich eingeholt.'}</p>
+      <div class="lives big" aria-label="${left} von ${total} Leben">${Hud.livesHtml(left, total)}</div>
+      <p>${left === 1 ? 'Noch <b>1 Leben</b>' : `Noch <b>${left} Leben</b>`} · dein Apfel ist bei <b>${Math.floor(score)} m</b>.</p>
+      <button class="start" data-action="continue">Weitermachen</button>
+      <button class="start secondary" data-action="restart">Neu starten</button>
+      <p class="small"><kbd>Enter</kbd> = weitermachen bei ${Math.floor(score)} m · <kbd>R</kbd> = neu starten mit allen Leben</p>
+    `;
+  }
+
+  /** `livesTotal` > 0 marks the easy mode (lives shown, Kickstart offered). */
+  showGameOver(score: number, best: number, isRecord: boolean, apple: boolean, livesTotal = 0): void {
     this.overlayKind = 'gameover';
     this.overlay.hidden = false;
+    this.overlay.scrollTop = 0;
     this.armedAt = performance.now() + 700;
     this.overlayContent.innerHTML = `
       <h2>${apple ? 'Das Gewitter hat deinen Apfel eingeholt!' : 'Vom Gewitter eingeholt!'}</h2>
+      ${livesTotal > 0 ? `<div class="lives big" aria-label="Keine Leben mehr">${Hud.livesHtml(0, livesTotal)}</div><p>Alle Leben sind verbraucht.</p>` : ''}
       <p class="score">Dein Apfel kam <b>${Math.floor(score)} m</b> weit.</p>
       ${isRecord ? '<p class="record">Neuer Rekord!</p>' : `<p>Rekord: <b>${Math.floor(best)} m</b></p>`}
-      <button class="start" data-action="start">Nochmal versuchen</button>
+      <div class="buttons">
+        <button class="start" data-action="start">Nochmal versuchen</button>
+        ${livesTotal > 0 ? Hud.kickstartHtml(best) : ''}
+        <button class="start secondary" data-action="menu">Menü</button>
+      </div>
       <p class="small">oder <kbd>Enter</kbd> drücken</p>
     `;
   }
