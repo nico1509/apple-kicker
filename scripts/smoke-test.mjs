@@ -616,7 +616,7 @@ try {
   });
   check(gnome !== null, `gnomes walk on the forest track (${gnome ? (-gnome.homeZ).toFixed(0) + ' m' : 'none'})`);
   if (gnome) {
-    const findGnome = () => page.evaluate((n) => window.__appleKicker.game.debugGnomes().find((q) => q.homeZ === n.homeZ), gnome);
+    const findGnome = () => page.evaluate((n) => window.__appleKicker.game.debugGnomes().find((q) => q.id === n.id), gnome);
     await page.evaluate((n) => {
       const k = window.__appleKicker.game;
       k.player.reset(n.x - 0.3, n.homeZ + 2.8, 0);
@@ -625,6 +625,21 @@ try {
     }, gnome);
     await simulate(0.05);
     await shot('18-gnome.png');
+    // A free apple within 20 m draws the gnome off its patrol, wherever the player is;
+    // further away it is left alone.
+    const n00 = await findGnome();
+    await page.evaluate((n) => {
+      const k = window.__appleKicker.game;
+      k.player.reset(n.x, n.z + 40, 0);
+      k.debugApple(n.x, n.z - 24);
+    }, n00);
+    await simulate(1);
+    const nf = await findGnome();
+    check(Math.abs(nf.z - n00.z) < 0.3, `a gnome ignores an apple 24 m away (${(n00.z - nf.z).toFixed(2)} m towards it)`);
+    await page.evaluate((n) => window.__appleKicker.game.debugApple(n.x, n.z - 12), nf);
+    await simulate(1);
+    const nc = await findGnome();
+    check(nf.z - nc.z > 1.5, `a gnome runs after an apple 12 m away, with the player 40 m off (${(nf.z - nc.z).toFixed(2)} m in 1 s)`);
     const n0 = await findGnome();
     await page.evaluate((n) => {
       const k = window.__appleKicker.game;
@@ -653,7 +668,7 @@ try {
     await shot('20-gnome-down.png');
     const stars = await page.evaluate((n) => {
       for (const list of window.__appleKicker.game.world.obstacles.gnomes.values()) {
-        for (const g of list) if (g.homeZ === n.homeZ) return g.stars.visible ? g.stars.children.length : 0;
+        for (const g of list) if (g.id === n.id) return g.stars.visible ? g.stars.children.length : 0;
       }
       return -1;
     }, gnome);

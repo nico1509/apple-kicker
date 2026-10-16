@@ -4,6 +4,7 @@ import { clamp, damp } from '../utils/math';
 import { rand, type Rng } from '../utils/noise';
 import type { ColliderStore } from '../world/colliders';
 import type { Apple } from './apple';
+import { SPIT_RANGE } from './camel';
 
 /**
  * A forest gnome (Wichtel) that walks back and forth across the track. When
@@ -11,6 +12,8 @@ import type { Apple } from './apple';
  * player's walking speed until the player kicks it over.
  */
 export interface Gnome {
+  /** Unique number (for tests). */
+  id: number;
   group: THREE.Group;
   /** Pivot at the feet; tips over when the gnome is kicked. */
   body: THREE.Group;
@@ -32,6 +35,8 @@ export interface Gnome {
   phase: number;
   /** Set when its chunk is unloaded. */
   removed: boolean;
+  /** True while it runs after a free apple nearby. */
+  chasing: boolean;
 }
 
 /** The model is built about 1 m tall and scaled up a little. */
@@ -42,6 +47,8 @@ const PATROL_SPEED = 0.9;
 export const GNOME_RUN_SPEED = CFG.player.walkSpeed / 2;
 /** The apple is grabbed when it comes this close (horizontally) to the gnome. */
 const GRAB_DIST = 0.42;
+/** A free apple within this distance of a gnome (the camel's range) draws it off its patrol. */
+export const GNOME_CHASE_RANGE = SPIT_RANGE;
 const FALL_TIME = 0.35;
 const FALL_ANGLE = -Math.PI / 2 + 0.12;
 /** Where the apple sits in the gnome's hands (local to its group). */
@@ -65,6 +72,7 @@ export class GnomeFactory {
   private readonly starMat = new THREE.MeshBasicMaterial({ color: 0xffd84a });
   private readonly hats = HAT_COLORS.map((c) => new THREE.MeshLambertMaterial({ color: c, flatShading: true }));
   private readonly coats = COAT_COLORS.map((c) => new THREE.MeshLambertMaterial({ color: c, flatShading: true }));
+  private built = 0;
 
   constructor() {
     const shape = new THREE.Shape();
@@ -126,6 +134,7 @@ export class GnomeFactory {
     }
     const span = rand(rng, 1.6, 2.3);
     return {
+      id: this.built++,
       group, body, arms, boots, stars,
       homeX: x, homeZ: z, axisX, axisZ, span,
       t: rand(rng, -span, span),
@@ -134,6 +143,7 @@ export class GnomeFactory {
       fall: 0,
       phase: rng() * 6,
       removed: false,
+      chasing: false,
     };
   }
 
@@ -192,7 +202,18 @@ export class GnomeBand {
       let speed = 0;
       if (!active) {
         // Frozen while the game is paused or over.
+      } else if (g.state === 'walk' && !apple.held && Math.hypot(apple.pos.x - pos.x, apple.pos.z - pos.z) < GNOME_CHASE_RANGE) {
+        // A free apple nearby: run after it (wherever the player is).
+        g.chasing = true;
+        this.runTowards(g, apple.pos.x - pos.x, apple.pos.z - pos.z, dt);
+        speed = GNOME_RUN_SPEED;
+        this.tryGrab(g, apple, events);
       } else if (g.state === 'walk') {
+        if (g.chasing) {
+          // The apple got away: patrol again where the gnome stands.
+          g.chasing = false;
+          this.settle(g);
+        }
         g.t += g.dir * PATROL_SPEED * dt;
         if (g.t > g.span) {
           g.t = g.span;
@@ -205,31 +226,10 @@ export class GnomeBand {
         pos.z = g.homeZ + g.axisZ * g.t;
         g.group.rotation.y = damp(g.group.rotation.y, Math.atan2(g.axisX * g.dir, g.axisZ * g.dir), 8, dt);
         speed = PATROL_SPEED;
-        if (!apple.held && Math.hypot(apple.pos.x - pos.x, apple.pos.z - pos.z) < GRAB_DIST && apple.pos.y < pos.y + 0.8) {
-          g.state = 'carry';
-          apple.held = true;
-          this.holder = g;
-          this.grabs++;
-          events.onGrab();
-        }
+        this.tryGrab(g, apple, events);
       } else {
-        // Run away from the player, but stay within reach of the track.
-        let dx = pos.x - pp.x;
-        let dz = pos.z - pp.z;
-        const l = Math.hypot(dx, dz) || 1;
-        dx /= l;
-        dz /= l;
-        const off = this.world.pathOffset(pos.x, pos.z);
-        if (Math.abs(off) > 9) dx -= Math.sign(off) * Math.min(1.5, (Math.abs(off) - 9) / 3);
-        const want = Math.atan2(dx, dz);
-        let rel = want - g.group.rotation.y;
-        rel = Math.atan2(Math.sin(rel), Math.cos(rel));
-        g.group.rotation.y += clamp(rel, -6 * dt, 6 * dt);
-        const yaw = g.group.rotation.y;
-        pos.x += Math.sin(yaw) * GNOME_RUN_SPEED * dt;
-        pos.z += Math.cos(yaw) * GNOME_RUN_SPEED * dt;
-        if (pos.z > CFG.path.startLineZ - 1) pos.z = CFG.path.startLineZ - 1;
-        this.avoidTrees(pos);
+        // Run away from the player.
+        this.runTowards(g, pos.x - pp.x, pos.z - pp.z, dt);
         speed = GNOME_RUN_SPEED;
       }
       pos.y = this.world.groundHeight(pos.x, pos.z);
@@ -257,6 +257,36 @@ export class GnomeBand {
         apple.vel.set(0, 0, 0);
       }
     }
+  }
+
+  /** Runs in direction (dx, dz), turning smoothly and staying within reach of the track. */
+  private runTowards(g: Gnome, dx: number, dz: number, dt: number): void {
+    const pos = g.group.position;
+    const l = Math.hypot(dx, dz) || 1;
+    dx /= l;
+    dz /= l;
+    const off = this.world.pathOffset(pos.x, pos.z);
+    if (Math.abs(off) > 9) dx -= Math.sign(off) * Math.min(1.5, (Math.abs(off) - 9) / 3);
+    let rel = Math.atan2(dx, dz) - g.group.rotation.y;
+    rel = Math.atan2(Math.sin(rel), Math.cos(rel));
+    g.group.rotation.y += clamp(rel, -6 * dt, 6 * dt);
+    const yaw = g.group.rotation.y;
+    pos.x += Math.sin(yaw) * GNOME_RUN_SPEED * dt;
+    pos.z += Math.cos(yaw) * GNOME_RUN_SPEED * dt;
+    if (pos.z > CFG.path.startLineZ - 1) pos.z = CFG.path.startLineZ - 1;
+    this.avoidTrees(pos);
+  }
+
+  /** A walking gnome grabs a free apple that touches it. */
+  private tryGrab(g: Gnome, apple: Apple, events: GnomeEvents): void {
+    const pos = g.group.position;
+    if (apple.held || Math.hypot(apple.pos.x - pos.x, apple.pos.z - pos.z) >= GRAB_DIST || apple.pos.y >= pos.y + 0.8) return;
+    g.state = 'carry';
+    g.chasing = false;
+    apple.held = true;
+    this.holder = g;
+    this.grabs++;
+    events.onGrab();
   }
 
   /** Trees and other solid colliders stop a running gnome; it slides around them. */

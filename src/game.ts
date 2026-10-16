@@ -468,7 +468,7 @@ export class Game {
     const t = this.world.terrain;
     if (t.gorgeNear(p, GORGE.rim + 5)) return false;
     for (const g of this.gnomes()) {
-      if (g.state !== 'down' && Math.abs(-g.group.position.z - (p + APPLE_AHEAD / 2)) < 4) return false;
+      if (g.state !== 'down' && Math.abs(-g.group.position.z - (p + APPLE_AHEAD / 2)) < 8) return false;
     }
     if (Math.abs(t.pathSlope(p)) > 0.08 || Math.abs(t.pathSlope(p + APPLE_AHEAD)) > 0.08) return false;
     for (let q = p - 1; q <= p + APPLE_AHEAD + 1.5; q += 0.25) {
@@ -835,8 +835,8 @@ export class Game {
   }
 
   /** Gnomes in the generated chunks (testing only). */
-  debugGnomes(): Array<{ x: number; z: number; state: string; homeX: number; homeZ: number }> {
-    return [...this.gnomes()].map((g) => ({ x: g.group.position.x, z: g.group.position.z, state: g.state, homeX: g.homeX, homeZ: g.homeZ }));
+  debugGnomes(): Array<{ id: number; x: number; z: number; state: string; homeX: number; homeZ: number }> {
+    return [...this.gnomes()].map((g) => ({ id: g.id, x: g.group.position.x, z: g.group.position.z, state: g.state, homeX: g.homeX, homeZ: g.homeZ }));
   }
 
   /** Gorges of the first landscape sections (testing only). */
