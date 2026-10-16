@@ -83,19 +83,21 @@ export interface Gorge {
 
 export const GORGE = {
   /** Half width (m along the track) of the gorge at the top. */
-  half: 5.5,
-  depth: 16,
+  half: 16.5,
+  depth: 18,
   /** Beyond this lateral distance from the track the gorge has closed. */
   reach: 36,
   /** Half width of the bridge deck: beyond it the apple falls into the gorge. */
   deckHalf: 1.5,
   /** Half length of the bridge deck (it rests on the ground at both ends). */
-  deckHalfLen: 6.9,
+  deckHalfLen: 17.9,
   /** Distance of the invisible walls along the rims from the gorge centre line. */
-  rim: 6.7,
+  rim: 17.7,
+  /** The deck lies this much above the track so the planks never cut into the ground. */
+  lift: 0.06,
 } as const;
 /** Over this distance from a gorge the track eases into a straight, level line. */
-const GORGE_FLAT = 28;
+const GORGE_FLAT = 42;
 /** Search ranges (m into a Greek section) for the first and the second gorge. */
 const GORGE_SLOTS: ReadonlyArray<[number, number]> = [[170, 440], [560, 830]];
 
@@ -241,8 +243,8 @@ export class Terrain {
         for (let attempt = 0; attempt < 12; attempt++) {
           const c = k * LANDSCAPE_LENGTH + lo + rng() * (hi - lo);
           const h = this.rawPathHeight(c);
-          let ok = Math.abs(this.rawCenterX(c + 25) - this.rawCenterX(c - 25)) < 4.5;
-          for (const o of [-24, -12, 12, 24]) if (Math.abs(this.rawPathHeight(c + o) - h) > 1.4) ok = false;
+          let ok = Math.abs(this.rawCenterX(c + 40) - this.rawCenterX(c - 40)) < 6;
+          for (const o of [-40, -24, -12, 12, 24, 40]) if (Math.abs(this.rawPathHeight(c + o) - h) > 2) ok = false;
           if (!ok) continue;
           list!.push({ p: c, x: this.rawCenterX(c), h });
           break;
@@ -275,7 +277,8 @@ export class Terrain {
     const edge = (GORGE.half - 0.35 + 0.7 * noise1(d * 0.21 + g.p, this.seed + 71)) * (1 - smoothstep(GORGE.reach - 13, GORGE.reach, ad));
     const u = Math.abs(p - g.p);
     if (u >= edge) return 0;
-    const t = 1 - smoothstep(edge * 0.38, edge, u);
+    // Steep rock walls about 4 m wide, a broad floor in between.
+    const t = 1 - smoothstep(edge - 4.5, edge, u);
     return GORGE.depth * t * (0.85 + 0.15 * noise1(d * 0.33, this.seed + 73));
   }
 
@@ -385,9 +388,11 @@ export class Terrain {
     const ad = Math.abs(d);
     const s = this.seed;
     const gorge = this.gorgeNear(-z, GORGE.deckHalfLen + 3);
-    // The ruts fade out before the bridge so the deck continues the track without a step.
+    // The ruts fade out before the bridge and the track ramps up to the deck,
+    // so the deck continues it without a step. The visible ground stays a little
+    // below the planks.
     const ruts = gorge ? smoothstep(GORGE.deckHalfLen, GORGE.deckHalfLen + 2.5, Math.abs(-z - gorge.p)) : 1;
-    let h = pathH + this.crossSection(d) * ruts;
+    let h = pathH + this.crossSection(d) * ruts + GORGE.lift * (1 - ruts) * (deck ? 1 : 0.5);
     const dd = Math.max(0, ad - CFG.path.halfWidth);
     h += slope * Math.min(dd, 45);
     h += 0.9 * fbm2(x * 0.07, z * 0.07, s + 21, 3) * smoothstep(1.7, 6, ad);

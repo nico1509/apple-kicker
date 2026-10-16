@@ -605,7 +605,9 @@ export class Obstacles {
    * walls along the deck and the rims keep the player out of it.
    */
   private addBridge(group: THREE.Group, chunk: number, g: Gorge): void {
-    const { x: cx, h, p: c } = g;
+    const { x: cx, p: c } = g;
+    // Height of the deck surface.
+    const h = g.h + GORGE.lift;
     const L = GORGE.deckHalfLen;
     const W = GORGE.deckHalf;
     const box = (mat: THREE.Material, x: number, y: number, z: number, sx: number, sy: number, sz: number, rx = 0): void => {
@@ -632,11 +634,16 @@ export class Obstacles {
     }
     // Two girders and cross beams underneath.
     for (const sx of [-1, 1]) box(this.steelMat, cx + sx * (W - 0.25), h - 0.42, -c, 0.24, 0.64, 2 * L);
-    for (let k = 0; k <= 6; k++) box(this.steelMat, cx, h - 0.17, zStart - (k * 2 * L) / 6, 2 * W, 0.12, 0.16);
+    for (let k = 0; k <= 18; k++) box(this.steelMat, cx, h - 0.17, zStart - (k * 2 * L) / 18, 2 * W, 0.12, 0.16);
+    // Two stone piers carry the long span.
+    for (const e of [-1, 1]) {
+      const pz = -(c + e * L / 3);
+      box(this.limeMat, cx, h - 0.55 - GORGE.depth / 2, pz, 2 * W - 0.2, GORGE.depth, 1.4);
+    }
     // Stone abutments on both rims.
     for (const e of [-1, 1]) box(this.limeMat, cx, h - 2.2, -(c + e * (L - 0.7)), 2 * W + 1.2, 4, 1.5);
     // Side trusses: posts, a top rail, a middle rail and diagonals in between.
-    const bays = 8;
+    const bays = 24;
     const bay = (2 * L) / bays;
     const top = 1.2;
     const mid = 0.62;
