@@ -417,7 +417,7 @@ try {
     const clear = central.some((ic) => g.respawnClear(ic.p - 0.6));
     return { off, blocked, n: list.length, minGap, central: central.length, clear, from: Math.min(...ps) };
   });
-  check(ice.off < 2.3, `icicles stand on the track (max ${ice.off.toFixed(2)} m off centre)`);
+  check(ice.off < 6.7, `icicles stand on and beside the track (max ${ice.off.toFixed(2)} m off centre)`);
   check(ice.blocked === ice.n, `every icicle is an obstacle (${ice.blocked}/${ice.n} colliders)`);
   check(ice.minGap >= 1.5, `icicles leave room to get through (closest ${ice.minGap.toFixed(2)} m)`);
   check(!ice.clear, `nobody respawns among the icicles (${ice.central} near the centre line)`);

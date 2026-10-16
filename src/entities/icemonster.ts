@@ -48,7 +48,7 @@ const MIN_VISITS = 3;
 /** How long the monster rages on the track (seconds). */
 export const RAGE_SECONDS = 5.5;
 const RUN_SPEED = 9;
-const RAGE_SPEED = 6.5;
+const RAGE_SPEED = 11;
 /** It comes from this far beside the track and runs back there. */
 const SIDE_DISTANCE = 30;
 /** Seconds between two icicles. */
@@ -58,6 +58,9 @@ const ICICLE_SPACING = 1.6;
 const ICICLE_GROW = 0.25;
 /** Horizontal radius of the monster's body for bumping into player and apple. */
 const BODY_RADIUS = 1.0;
+/** Half length (along the track) and half width (across it) of the stretch it rages on. */
+export const RAGE_HALF_LENGTH = 18;
+export const RAGE_HALF_WIDTH = 6;
 const SCALE = 1.15;
 
 /**
@@ -249,9 +252,9 @@ export class IceMonster {
       // Hectic dashes to random spots on this stretch of track.
       this.retarget -= dt;
       if (this.retarget <= 0 || Math.hypot(this.target.x - g.x, this.target.y - g.z) < 0.4) {
-        const p = this.centreP + rand(this.rng, -4.5, 4.5);
-        this.target.set(h.pathCenterX(p) + rand(this.rng, -1.5, 1.5), -p);
-        this.retarget = rand(this.rng, 0.45, 0.9);
+        const p = this.centreP + rand(this.rng, -RAGE_HALF_LENGTH, RAGE_HALF_LENGTH);
+        this.target.set(h.pathCenterX(p) + rand(this.rng, -RAGE_HALF_WIDTH, RAGE_HALF_WIDTH), -p);
+        this.retarget = rand(this.rng, 0.9, 1.8);
       }
       speed = this.moveTowards(this.target.x, this.target.y, RAGE_SPEED, dt);
       this.icicleTimer -= dt;
@@ -367,8 +370,8 @@ export class IceMonster {
   // Icicles
 
   /**
-   * An icicle shoots out of the ground where the monster has just been, on the
-   * track. Never right under the player or the apple, and never too close to
+   * An icicle shoots out of the ground where the monster has just been, on or
+   * beside the track. Never right under the player or the apple, and never too close to
    * another icicle, so there is always a way through.
    */
   private spawnIcicle(player: IceMonsterTarget, apple: IceMonsterTarget): boolean {
@@ -379,7 +382,7 @@ export class IceMonster {
     const z = g.z - Math.cos(this.heading) * back;
     const p = -z;
     const d = x - this.host.pathCenterX(p);
-    if (Math.abs(d) > CFG.path.halfWidth + 0.6) return false;
+    if (Math.abs(d) > RAGE_HALF_WIDTH + 0.6) return false;
     if (Math.hypot(x - player.pos.x, z - player.pos.z) < 1.3) return false;
     if (Math.hypot(x - apple.pos.x, z - apple.pos.z) < 0.8) return false;
     for (const ic of this.icicles) if (Math.hypot(ic.x - x, ic.z - z) < ICICLE_SPACING) return false;

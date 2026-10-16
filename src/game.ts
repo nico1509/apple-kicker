@@ -4,7 +4,7 @@ import { CFG, type Foot } from './config';
 import { Apple } from './entities/apple';
 import { CamelSpit, SPIT_PUSH, type Camel } from './entities/camel';
 import { GnomeBand, type Gnome } from './entities/gnome';
-import { IceMonster } from './entities/icemonster';
+import { IceMonster, RAGE_HALF_LENGTH } from './entities/icemonster';
 import { Input } from './entities/input';
 import { Player, type PlayerEvents } from './entities/player';
 import { EASY_LIVES, Hud, type Cause, type Difficulty } from './ui/hud';
@@ -481,7 +481,7 @@ export class Game {
     for (const g of this.gnomes()) {
       if (g.state !== 'down' && Math.abs(-g.group.position.z - (p + APPLE_AHEAD / 2)) < 8) return false;
     }
-    if (this.iceMonster.active && Math.abs(this.iceMonster.progress - (p + APPLE_AHEAD / 2)) < 15) return false;
+    if (this.iceMonster.active && Math.abs(this.iceMonster.progress - (p + APPLE_AHEAD / 2)) < RAGE_HALF_LENGTH + 10) return false;
     if (Math.abs(t.pathSlope(p)) > 0.08 || Math.abs(t.pathSlope(p + APPLE_AHEAD)) > 0.08) return false;
     for (let q = p - 1; q <= p + APPLE_AHEAD + 1.5; q += 0.25) {
       const x = t.pathCenterX(q);
