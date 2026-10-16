@@ -90,12 +90,6 @@ npm run smoke      # Headless-Test mit Chromium (CHROME_PATH auf ein Chrome/Chro
 Der Produktions-Build in `dist/` ist rein statisch und läuft von jedem Webserver
 (auch aus einem Unterverzeichnis, z. B. GitHub Pages).
 
-### Stimmung
-
-Die Optik orientiert sich an deutschen Feldwegen im Oktober: Fahrspuren mit
-Grasstreifen, Hecken und Streuobstwiesen, frisch gepflügte Äcker, Weinberge am Hang
-und bewaldete Hügel am Horizont unter Schleierwolken.
-
 ### Logo
 
 Das Logo nutzt die Schrift [Luckiest Guy](https://fonts.google.com/specimen/Luckiest+Guy)
