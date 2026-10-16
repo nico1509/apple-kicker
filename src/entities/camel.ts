@@ -18,7 +18,9 @@ export const SPIT_INTERVAL = 1;
 /** Metres the player is pushed along the flight direction of a spit that hits. */
 export const SPIT_PUSH = 5;
 /** Within this distance (metres) the camel watches and spits at the player; beyond it the camel does nothing. */
-export const SPIT_RANGE = 10;
+export const SPIT_RANGE = 20;
+/** Average speed of the spit towards its target (m/s). */
+const SPIT_SPEED = 22;
 const SPIT_GRAVITY = 9.81;
 /** Neck can turn this far to either side (radians). */
 const NECK_LIMIT = 1.7;
@@ -172,7 +174,7 @@ export class CamelSpit {
     const start = camel.mouth.getWorldPosition(this.tmp);
     const target = this.tmp2.set(p.x, p.y + 1.45, p.z);
     const dist = start.distanceTo(target);
-    const t = clamp(dist / 11, 0.25, 1.4);
+    const t = clamp(dist / SPIT_SPEED, 0.12, 1.4);
     const vel = new THREE.Vector3(
       (target.x - start.x) / t,
       (target.y - start.y) / t + 0.5 * SPIT_GRAVITY * t,

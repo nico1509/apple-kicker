@@ -246,7 +246,7 @@ try {
   const rg2 = await walkAndKick('right', 320, 0);
   check(rg2.after.appleMax > 1300, `apple moves through Greek obstacles (${rg2.after.appleMax.toFixed(1)} m)`);
 
-  // Desert camel: within 10 m it spits at once and then every second; a hit pushes the player ~5 m.
+  // Desert camel: within 20 m it spits at once and then every second; a hit pushes the player ~5 m.
   const camelAt = await page.evaluate(() => {
     const k = window.__appleKicker;
     for (let p = 2050; p < 2950; p += 120) {
@@ -277,16 +277,16 @@ try {
         g.debugLook(Math.atan2(-(c.x - px), -(c.z - pz)), -0.1);
       }, [camelAt, dist]);
     };
-    await standAt(14);
+    await standAt(24);
     const f0 = await page.evaluate(() => window.__appleKicker.game.spit.fired);
     await simulate(4);
     const f1 = await page.evaluate(() => window.__appleKicker.game.spit.fired);
-    check(f1 === f0, `camel ignores a player 14 m away (${f1 - f0} spits)`);
+    check(f1 === f0, `camel ignores a player 24 m away (${f1 - f0} spits)`);
     await standAt(6);
     const before = await state();
     await simulate(0.05);
     const f2 = await page.evaluate(() => window.__appleKicker.game.spit.fired);
-    check(f2 - f1 === 1, `camel spits at once when the player steps within 10 m (${f2 - f1} spits)`);
+    check(f2 - f1 === 1, `camel spits at once when the player steps within 20 m (${f2 - f1} spits)`);
     const timer = await page.evaluate((c) => {
       for (const list of window.__appleKicker.game.world.obstacles.camels.values()) {
         for (const k of list) if (Math.abs(k.group.position.z - c.z) < 0.01) return k.timer;
@@ -299,7 +299,7 @@ try {
     await simulate(1.5);
     const after = await state();
     const moved = Math.hypot(after.playerX - before.playerX, after.playerZ - before.playerZ);
-    check(moved > 3.5, `a spit pushes the player about 5 m (${moved.toFixed(2)} m)`);
+    check(moved > 4.5, `a spit pushes the player at least 5 m (${moved.toFixed(2)} m)`);
   }
   // Back to the state the storm checks below expect: player at 300 m, apple far ahead.
   await page.evaluate(() => window.__appleKicker.teleport(300));
