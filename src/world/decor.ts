@@ -3,6 +3,7 @@ import { CFG } from '../config';
 import { smoothstep } from '../utils/math';
 import { fbm2, hash3, mulberry32, rand, subSeed, type Rng } from '../utils/noise';
 import { ColliderStore, SURFACES } from './colliders';
+import { landscapeAt, landscapeWeight } from './landscape';
 import { Terrain, type BiomeType, type Side } from './terrain';
 
 /** Collects instance transforms and colours, then bakes them into an InstancedMesh. */
@@ -51,7 +52,25 @@ const CANOPY_COLORS = {
   leaf: [C(0xd6872a), C(0xe0a030), C(0xb85a24), C(0x8f5a2c), C(0xd9b13c)],
   tuft: [C(0x7ea63f), C(0x9db54a), C(0xc2b25a), C(0x6c9a37)],
   far: [C(0x35612c), C(0x2f5629), C(0x4a7532), C(0x6f8a2e), C(0x9a7a2e)],
+  // Greece in late summer.
+  olive: [C(0x93a378), C(0xa0ae84), C(0x86976c), C(0xaab48c)],
+  cypress: [C(0x2c4a2a), C(0x33522e), C(0x284326)],
+  shrub: [C(0x5f6b38), C(0x6f7a3e), C(0x7f7c3a), C(0x67733c), C(0x8a7a3e), C(0x96603a)],
+  oleander: [C(0x4f7a36), C(0x5a8540)],
+  blossom: [C(0xe0609a), C(0xec7fb0), C(0xd24c86)],
+  dryTuft: [C(0xd2bd76), C(0xc4ad62), C(0xb39c58), C(0x9aa050)],
+  pebble: [C(0xd8d2c2), C(0xc2bcab), C(0xe2dccb)],
+  farGreece: [C(0x56663a), C(0x4a5a33), C(0x6a7442), C(0x7e7a44)],
 };
+const ROCK_COLORS = [C(0xc9c3b3), C(0xb4ae9f), C(0xd8d2c2), C(0xa8a293)];
+const OLIVE_TRUNK_COLORS = [C(0x8a7f6c), C(0x978b76), C(0x7b715f)];
+const WALL_STONE_COLORS = [C(0xbdb4a2), C(0xa99f8c), C(0xcfc6b2), C(0x9a907e), C(0xb5a088)];
+const WHITEWASH = C(0xf1ede3);
+const ROOF_TILES = [C(0xc4623a), C(0xb8582f), C(0xcf7244)];
+const WOOD_DARK = C(0x5d4a38);
+const HAY = [C(0xd9bf6c), C(0xcdb05c), C(0xe0c87a)];
+const SAIL_CLOTH = C(0xf4f1e8);
+const SAIL_SPOKE = C(0x8a7f70);
 const TRUNK_COLORS = [C(0x6b4d33), C(0x7a5a3c), C(0x5a4330)];
 const POST_COLOR = C(0x8a7a62);
 const RAIL_COLOR = C(0x9c8a6b);
@@ -70,6 +89,7 @@ export class Decor {
   private readonly tuftGeo: THREE.BufferGeometry;
   private readonly farConeGeo: THREE.BufferGeometry;
   private readonly farBlobGeo: THREE.BufferGeometry;
+  private readonly roofGeo: THREE.BufferGeometry;
 
   private readonly m = new THREE.Matrix4();
   private readonly q = new THREE.Quaternion();
@@ -91,12 +111,19 @@ export class Decor {
     this.tuftGeo = new THREE.ConeGeometry(1, 1, 3).translate(0, 0.5, 0);
     this.farConeGeo = new THREE.ConeGeometry(1, 1, 5).translate(0, 0.5, 0);
     this.farBlobGeo = new THREE.IcosahedronGeometry(1, 0); // 20 triangles for the fogged distance
+    // Gable roof: a triangular prism 1 wide (x), 1 high and 1 long (z), resting on y = 0.
+    const roof = new THREE.Shape();
+    roof.moveTo(-0.5, 0);
+    roof.lineTo(0.5, 0);
+    roof.lineTo(0, 1);
+    roof.lineTo(-0.5, 0);
+    this.roofGeo = new THREE.ExtrudeGeometry(roof, { depth: 1, bevelEnabled: false }).translate(0, 0, -0.5);
   }
 
   dispose(): void {
     for (const g of [
       this.trunkGeo, this.canopyGeo, this.coneGeo, this.bushGeo,
-      this.boxGeo, this.leafGeo, this.tuftGeo, this.farConeGeo, this.farBlobGeo,
+      this.boxGeo, this.leafGeo, this.tuftGeo, this.farConeGeo, this.farBlobGeo, this.roofGeo,
     ]) g.dispose();
     this.flatMat.dispose();
     this.leafMat.dispose();
@@ -226,9 +253,14 @@ export class Decor {
     return hash3(i, side, this.terrain.seed + 77) < 0.3;
   }
 
+  /** Biomes that get a wooden fence along the track. */
+  private static fenced(b: BiomeType): boolean {
+    return b === 'meadow' || b === 'farmstead';
+  }
+
   /**
    * A fence along the meadow edge: posts on a global 2.4 m grid (so fences of
-   * neighbouring chunks line up), only where the biome is meadow.
+   * neighbouring chunks line up), only where the biome is meadow (or a Greek farmstead).
    */
   private addFence(b: Batches, chunk: number, i: number, side: Side): void {
     const { p0, p1 } = Terrain.chunkRange(i);
@@ -239,14 +271,14 @@ export class Decor {
     let prevZ = 0;
     const first = Math.ceil(p0 / step) * step;
     // Bridge to the last post of a fenced previous chunk.
-    if (i - 1 >= -CFG.chunk.behind && this.fenceOn(i - 1, side) && this.terrain.biomeAt(first - step, side) === 'meadow') {
+    if (i - 1 >= -CFG.chunk.behind && this.fenceOn(i - 1, side) && Decor.fenced(this.terrain.biomeAt(first - step, side))) {
       const pp = first - step;
       prevX = this.terrain.pathCenterX(pp) + d;
       prevZ = -pp;
       prevY = this.terrain.groundHeight(prevX, prevZ);
     }
     for (let p = first; p < p1 - 1e-6; p += step) {
-      if (this.terrain.biomeAt(p, side) !== 'meadow') {
+      if (!Decor.fenced(this.terrain.biomeAt(p, side))) {
         prevX = NaN;
         continue;
       }
@@ -322,7 +354,7 @@ export class Decor {
 
   private addLeaves(b: Batches, i: number, rng: Rng): void {
     const { p0, p1 } = Terrain.chunkRange(i);
-    // Leaves on the track.
+    // Leaves on the track (pale pebbles in Greece).
     for (let k = 0; k < 110; k++) {
       const p = rand(rng, p0, p1);
       const d = rand(rng, -2.3, 2.3);
@@ -330,7 +362,9 @@ export class Decor {
       const z = -p;
       const y = this.terrain.groundHeight(x, z) + 0.012;
       const s = rand(rng, 0.05, 0.1);
-      this.place(b.leaf, x, y, z, s, 1, s * rand(rng, 0.6, 1), rng() * 6.28, this.pickColor(CANOPY_COLORS.leaf, rng, 0.1));
+      const greek = rng() < landscapeWeight(p, 'greece');
+      if (greek) this.place(b.leaf, x, y, z, s * 0.6, 1, s * 0.5, rng() * 6.28, this.pickColor(CANOPY_COLORS.pebble, rng, 0.08));
+      else this.place(b.leaf, x, y, z, s, 1, s * rand(rng, 0.6, 1), rng() * 6.28, this.pickColor(CANOPY_COLORS.leaf, rng, 0.1));
     }
     // Leaves under trees.
     for (let k = 0; k < 160; k++) {
@@ -357,24 +391,44 @@ export class Decor {
       if (biome === 'field') d = rand(rng, 1.3, 2.6);
       else if (biome === 'vineyard') d = rand(rng, 1.3, 3.0);
       else if (biome === 'hedge') d = rng() < 0.5 ? rand(rng, 1.3, 1.9) : rand(rng, 6, 30);
-      else if (biome === 'forest') d = rand(rng, 1.3, 2.6);
+      else if (biome === 'forest' || biome === 'stubble') d = rand(rng, 1.3, 2.6);
+      else if (biome === 'olive') d = rand(rng, 1.3, 3.0);
       else d = rand(rng, 1.3, 30);
+      const dry = biome === 'phrygana' || biome === 'olive' || biome === 'stubble' || biome === 'farmstead';
       const x = this.terrain.pathCenterX(p) + side * d;
       const z = -p;
       const y = this.terrain.groundHeight(x, z) - 0.02;
       const s = rand(rng, 0.05, 0.1);
       const h = rand(rng, 0.14, 0.3);
-      this.place(b.tuft, x, y, z, s, h, s, rng() * 6.28, this.pickColor(CANOPY_COLORS.tuft, rng, 0.12), rand(rng, -0.25, 0.25), rand(rng, -0.25, 0.25));
+      this.place(b.tuft, x, y, z, s, h, s, rng() * 6.28, this.pickColor(dry ? CANOPY_COLORS.dryTuft : CANOPY_COLORS.tuft, rng, 0.12), rand(rng, -0.25, 0.25), rand(rng, -0.25, 0.25));
     }
   }
 
   private addFarForest(b: Batches, i: number, rng: Rng): void {
     const { zNear, zFar } = Terrain.chunkRange(i);
     for (const side of [-1, 1] as Side[]) {
+      // Windmills on the Greek slopes.
+      const pm = -(zNear + zFar) / 2;
+      if (landscapeAt(pm) === 'greece' && rng() < 0.14) {
+        this.addWindmills(b, side * rand(rng, 58, 120), rand(rng, zFar + 8, zNear), side, rng);
+      }
       for (let k = 0; k < 230; k++) {
         const ax = rand(rng, CFG.chunk.halfWidth + 3, CFG.chunk.farExtent - 10);
         const x = side * ax;
         const z = rand(rng, zFar, zNear);
+        if (rng() < landscapeWeight(-z, 'greece')) {
+          // Sparse scrub and cypresses below bare mountains.
+          if (rng() < 0.45 || rng() < smoothstep(90, 200, ax)) continue;
+          const y = this.terrain.groundHeight(x, z) - 0.3;
+          if (rng() < 0.25) {
+            const h = rand(rng, 6, 10);
+            this.place(b.farCone, x, y, z, h * 0.12, h, h * 0.12, rng() * 6.28, this.pickColor(CANOPY_COLORS.cypress, rng, 0.1));
+          } else {
+            const s = rand(rng, 1.8, 3.6);
+            this.place(ax < 100 ? b.farBlob : b.farBlobLod, x, y + s * 0.3, z, s, s * 0.6, s, rng() * 6.28, this.pickColor(CANOPY_COLORS.farGreece, rng, 0.12));
+          }
+          continue;
+        }
         // Leave meadow clearings in the distant hills.
         const n = fbm2(x * 0.01, z * 0.01, this.terrain.seed + 51, 3);
         if (n > 0.2 && ax < 150 && rng() < 0.85) continue;
@@ -387,6 +441,229 @@ export class Decor {
           // Full detail only in the un-fogged near band; a 20-triangle blob beyond.
           this.place(ax < 100 ? b.farBlob : b.farBlobLod, x, y + s * 0.8, z, s, s * 1.1, s, rng() * 6.28, this.pickColor(CANOPY_COLORS.far, rng, 0.15));
         }
+      }
+    }
+  }
+
+
+  // ---------------------------------------------------------------------------
+  // Greece
+
+  /** Pushes a position sideways so that an object of radius r stays off the lane. Returns the new x. */
+  private clearOfLane(x: number, z: number, r: number): number {
+    const cx = this.terrain.pathCenterX(-z);
+    const d = x - cx;
+    const minD = CFG.path.halfWidth + 0.2 + r;
+    return Math.abs(d) < minD ? cx + (d < 0 ? -1 : 1) * minD : x;
+  }
+
+  /** A gnarled olive tree: a short leaning trunk under a wide, silvery canopy. */
+  private addOliveTree(b: Batches, chunk: number, x: number, z: number, rng: Rng): void {
+    const y = this.terrain.groundHeight(x, z) - 0.1;
+    const h = rand(rng, 1.2, 1.9);
+    const tr = rand(rng, 0.16, 0.28);
+    const lean = rand(rng, -0.22, 0.22);
+    this.place(b.trunk, x, y, z, tr, h + 0.5, tr, rng() * 6.28, this.pickColor(OLIVE_TRUNK_COLORS, rng), lean, rand(rng, -0.22, 0.22));
+    // Several small, loose tufts rather than one dense ball.
+    const lobes = 4 + Math.floor(rng() * 3);
+    const spread = rand(rng, 1.1, 1.7);
+    for (let k = 0; k < lobes; k++) {
+      const a = (k / lobes) * Math.PI * 2 + rng();
+      const o = k === 0 ? 0 : spread * rand(rng, 0.6, 1.0);
+      const s = rand(rng, 0.6, 1.0) * (k === 0 ? 1.15 : 1);
+      this.place(b.canopy, x + Math.cos(a) * o, y + h + 0.5 + rand(rng, -0.2, 0.35), z + Math.sin(a) * o, s, s * rand(rng, 0.5, 0.7), s, rng() * 6.28, this.pickColor(CANOPY_COLORS.olive, rng, 0.06));
+    }
+    this.colliders.add(chunk, { kind: 'cylinder', x, z, r: tr + 0.08, yTop: y + h, surface: SURFACES.trunk, blocksPlayer: true });
+  }
+
+  /** A slim, dark Mediterranean cypress. */
+  private addCypress(b: Batches, chunk: number, x: number, z: number, rng: Rng): void {
+    const y = this.terrain.groundHeight(x, z) - 0.1;
+    const h = rand(rng, 5, 9);
+    const r = h * rand(rng, 0.09, 0.12);
+    this.place(b.trunk, x, y, z, 0.15, 1.0, 0.15, 0, this.pickColor(TRUNK_COLORS, rng));
+    this.place(b.canopy, x, y + 0.4 + h * 0.5, z, r, h * 0.5, r, rng() * 6.28, this.pickColor(CANOPY_COLORS.cypress, rng));
+    this.colliders.add(chunk, { kind: 'cylinder', x, z, r: 0.3, yTop: y + h, surface: SURFACES.bush, blocksPlayer: true });
+  }
+
+  /** Oleander: a green bush covered in pink blossoms. */
+  private addOleander(b: Batches, chunk: number, x: number, z: number, rng: Rng): void {
+    const scale = rand(rng, 0.9, 1.3);
+    const bx = this.addBush(b, chunk, x, z, rng, scale, CANOPY_COLORS.oleander);
+    const y = this.terrain.groundHeight(bx, z);
+    const n = 7 + Math.floor(rng() * 6);
+    for (let k = 0; k < n; k++) {
+      const a = rng() * Math.PI * 2;
+      const up = rand(rng, 0.2, 1);
+      const rr = scale * 0.95 * Math.sqrt(1 - up * up * 0.6);
+      const s = rand(rng, 0.13, 0.22);
+      this.place(b.bush, bx + Math.cos(a) * rr, y + scale * (0.4 + up * 0.75), z + Math.sin(a) * rr, s, s, s, rng() * 6.28, this.pickColor(CANOPY_COLORS.blossom, rng, 0.08));
+    }
+  }
+
+  /** A pale limestone boulder (with a smaller one or two beside it). */
+  private addRock(b: Batches, chunk: number, x: number, z: number, rng: Rng, scale = 1): void {
+    const r = rand(rng, 0.3, 0.85) * scale;
+    x = this.clearOfLane(x, z, r * 1.3);
+    const y = this.terrain.groundHeight(x, z) + r * 0.2;
+    this.place(b.rock, x, y, z, r * rand(rng, 1.0, 1.4), r * rand(rng, 0.6, 0.9), r * rand(rng, 1.0, 1.3), rng() * 6.28, this.pickColor(ROCK_COLORS, rng, 0.05), rand(rng, -0.3, 0.3), rand(rng, -0.3, 0.3));
+    this.colliders.add(chunk, { kind: 'sphere', x, y, z, r: r * 0.95, surface: SURFACES.stone, blocksPlayer: r > 0.35 });
+    const extra = Math.floor(rng() * 3);
+    for (let k = 0; k < extra; k++) {
+      const a = rng() * Math.PI * 2;
+      const rs = r * rand(rng, 0.3, 0.55);
+      const sx = this.clearOfLane(x + Math.cos(a) * r * 1.3, z, rs);
+      const sz = z + Math.sin(a) * r * 1.3;
+      const sy = this.terrain.groundHeight(sx, sz) + rs * 0.2;
+      this.place(b.rock, sx, sy, sz, rs * 1.2, rs * 0.8, rs, rng() * 6.28, this.pickColor(ROCK_COLORS, rng, 0.05));
+      this.colliders.add(chunk, { kind: 'sphere', x: sx, y: sy, z: sz, r: rs * 0.95, surface: SURFACES.stone, blocksPlayer: false });
+    }
+  }
+
+  /** Whether the drystone wall along the track runs at progress p on this side. */
+  private wallAt(p: number, side: Side): boolean {
+    const b = this.terrain.biomeAt(p, side);
+    if (b !== 'olive' && b !== 'stubble') return false;
+    if (hash3(Math.floor(p / 100), side, this.terrain.seed + 83) > 0.7) return false;
+    // A gap every now and then.
+    return hash3(Math.floor(p / 4), side, this.terrain.seed + 89) > 0.12;
+  }
+
+  /**
+   * A knee-high drystone wall along the track. Segments sit on a global 1.2 m
+   * grid so that walls of neighbouring chunks line up. Like the fence rails the
+   * wall bounces the apple, but the player can climb over it.
+   */
+  private addDryWall(b: Batches, chunk: number, i: number, side: Side): void {
+    const { p0, p1 } = Terrain.chunkRange(i);
+    const step = 1.2;
+    const dWall = side * 3.0;
+    const first = Math.ceil(p0 / step) * step;
+    for (let p = first; p < p1 - 1e-6; p += step) {
+      if (!this.wallAt(p, side)) continue;
+      const rng = mulberry32(subSeed(this.terrain.seed, 1300 + Math.round(p / step), side + 2));
+      const yaw = this.terrain.pathHeading(p);
+      const courses = 3;
+      for (let c = 0; c < courses; c++) {
+        for (let k = 0; k < 2; k++) {
+          const pp = p + (k + 0.5 - (c % 2) * 0.25) * (step / 2);
+          const x = this.terrain.pathCenterX(pp) + dWall + rand(rng, -0.04, 0.04);
+          const z = -pp;
+          const y = this.terrain.groundHeight(x, z) - 0.06 + c * 0.24;
+          const w = (0.62 - c * 0.07) * rand(rng, 0.9, 1.05);
+          this.place(b.box, x, y, z, w, rand(rng, 0.22, 0.3), (step / 2) * rand(rng, 0.85, 1.05), yaw + rand(rng, -0.12, 0.12), this.pickColor(WALL_STONE_COLORS, rng, 0.06), rand(rng, -0.06, 0.06), rand(rng, -0.08, 0.08));
+        }
+      }
+      if (this.wallAt(p + step, side)) {
+        const ax = this.terrain.pathCenterX(p) + dWall;
+        const bx = this.terrain.pathCenterX(p + step) + dWall;
+        const ay = this.terrain.groundHeight(ax, -p) + 0.4;
+        const by = this.terrain.groundHeight(bx, -(p + step)) + 0.4;
+        this.colliders.add(chunk, { kind: 'capsule', ax, ay, az: -p, bx, by, bz: -(p + step), r: 0.32, surface: SURFACES.stone, blocksPlayer: false });
+      }
+    }
+  }
+
+  /** Olive trees on a loose grid (global, so groves continue across chunks). */
+  private addOliveGrove(b: Batches, chunk: number, i: number, side: Side): void {
+    const { p0, p1 } = Terrain.chunkRange(i);
+    const spacing = 6.5;
+    const first = Math.ceil(p0 / spacing) * spacing;
+    for (let p = first; p < p1 - 1e-6; p += spacing) {
+      if (this.terrain.biomeAt(p, side) !== 'olive') continue;
+      const cx = this.terrain.pathCenterX(p);
+      for (let d = 6; d < CFG.chunk.halfWidth + 12; d += spacing) {
+        const rng = mulberry32(subSeed(this.terrain.seed, 1700 + Math.round(p / spacing), Math.round(d) * side));
+        if (rng() < 0.1) continue;
+        const x = cx + side * (d + rand(rng, -0.8, 0.8));
+        const z = -p + rand(rng, -0.8, 0.8);
+        if (Math.abs(x) > CFG.chunk.halfWidth - 1.5) continue;
+        this.addOliveTree(b, chunk, x, z, rng);
+      }
+    }
+  }
+
+  /** A whitewashed farmhouse with a terracotta (or flat) roof, set back from the track. */
+  private addHouse(b: Batches, chunk: number, x: number, z: number, side: Side, rng: Rng): void {
+    const yaw = this.terrain.pathHeading(-z) + rand(rng, -0.15, 0.15);
+    const len = rand(rng, 5.5, 8); // along the track (local z)
+    const dep = rand(rng, 4, 5.2); // across (local x)
+    const h = rand(rng, 2.6, 3.1);
+    const c = Math.cos(yaw);
+    const sn = Math.sin(yaw);
+    const world = (ox: number, oz: number): [number, number] => [x + ox * c + oz * sn, z - ox * sn + oz * c];
+    let lo = Infinity;
+    let hi = -Infinity;
+    for (const [ox, oz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
+      const [wx, wz] = world((ox * dep) / 2, (oz * len) / 2);
+      const gh = this.terrain.groundHeight(wx, wz);
+      lo = Math.min(lo, gh);
+      hi = Math.max(hi, gh);
+    }
+    const y0 = lo - 0.2;
+    const wallH = h + (hi - lo) + 0.2;
+    this.place(b.box, x, y0, z, dep, wallH, len, yaw, WHITEWASH);
+    if (rng() < 0.65) {
+      this.place(b.roof, x, y0 + wallH, z, dep + 0.5, rand(rng, 1.0, 1.4), len + 0.5, yaw, this.pickColor(ROOF_TILES, rng, 0.05));
+    } else {
+      this.place(b.box, x, y0 + wallH, z, dep + 0.15, 0.22, len + 0.15, yaw, WHITEWASH);
+    }
+    // Door and small windows on the side facing the track.
+    const face = -side * (dep / 2 + 0.01);
+    const yDoor = hi - 0.05;
+    const [dx, dz] = world(face, rand(rng, -len * 0.25, len * 0.25));
+    this.place(b.box, dx, yDoor, dz, 0.06, 1.95, 0.95, yaw, WOOD_DARK);
+    for (const t of [-0.38, 0.38]) {
+      const [wx, wz] = world(face, t * len);
+      this.place(b.box, wx, yDoor + 1.1, wz, 0.06, 0.62, 0.5, yaw, WOOD_DARK);
+    }
+    // Colliders: a row of cylinders along the house.
+    const n = Math.ceil(len / dep) + 1;
+    for (let k = 0; k < n; k++) {
+      const [cx, cz] = world(0, -len / 2 + dep / 2 + ((len - dep) * k) / Math.max(1, n - 1));
+      this.colliders.add(chunk, { kind: 'cylinder', x: cx, z: cz, r: dep / 2, yTop: y0 + wallH, surface: SURFACES.stone, blocksPlayer: true });
+    }
+  }
+
+  /** Small square straw bales left on the stubble. */
+  private addHayBales(b: Batches, chunk: number, x: number, z: number, rng: Rng): void {
+    const n = 1 + Math.floor(rng() * 3);
+    const yaw = rng() * 6.28;
+    for (let k = 0; k < n; k++) {
+      const bx = x + Math.cos(yaw) * k * 0.55;
+      const bz = z - Math.sin(yaw) * k * 0.55;
+      const y = this.terrain.groundHeight(bx, bz) - 0.03;
+      this.place(b.box, bx, y, bz, 0.5, 0.42, 1.0, yaw + rand(rng, -0.1, 0.1), this.pickColor(HAY, rng, 0.05));
+      this.colliders.add(chunk, { kind: 'cylinder', x: bx, z: bz, r: 0.45, yTop: y + 0.42, surface: SURFACES.bush, blocksPlayer: true });
+    }
+  }
+
+  /** A row of Lasithi-style windmills on the distant slopes: white towers with cloth sails. */
+  private addWindmills(b: Batches, x: number, z: number, side: Side, rng: Rng): void {
+    const count = 2 + Math.floor(rng() * 3);
+    for (let k = 0; k < count; k++) {
+      const mx = x + rand(rng, -2, 2);
+      const mz = z - k * rand(rng, 9, 12);
+      const y = this.terrain.groundHeight(mx, mz) - 0.4;
+      const towerH = rand(rng, 5, 6.5);
+      const R = rand(rng, 1.4, 1.7);
+      this.place(b.trunk, mx, y, mz, R, towerH, R, rng() * 6.28, WHITEWASH);
+      this.place(b.cone, mx, y + towerH, mz, R * 0.78, R * 0.7, R * 0.78, 0, this.pickColor(ROCK_COLORS, rng, 0.03));
+      // The sails face the track.
+      const hubX = mx - side * (R * 0.8 + 0.35);
+      const hubY = y + towerH - 0.1;
+      const L = rand(rng, 3.4, 4.2);
+      const turn = rng() * Math.PI;
+      for (let s = 0; s < 8; s++) {
+        const th = turn + (s * Math.PI) / 4;
+        const dy = Math.cos(th);
+        const dz = Math.sin(th);
+        // The box geometry starts at its local origin, so the spoke grows outwards from the hub.
+        this.place(b.box, hubX, hubY, mz, 0.08, L, 0.08, 0, SAIL_SPOKE, th);
+        // Triangular-looking cloth: a thin panel beside the outer part of the spoke.
+        const off = L * 0.36;
+        const w = L * 0.13; // half the cloth width, along (0, -dz, dy)
+        this.place(b.box, hubX - side * 0.05, hubY + dy * off - dz * w, mz + dz * off + dy * w, 0.03, L * 0.62, L * 0.26, 0, SAIL_CLOTH, th);
       }
     }
   }
@@ -407,6 +684,8 @@ export class Decor {
       farCone: new Batch(this.farConeGeo, this.flatMat, false, false),
       farBlob: new Batch(this.canopyGeo, this.flatMat, false, false),
       farBlobLod: new Batch(this.farBlobGeo, this.flatMat, false, false),
+      rock: new Batch(this.farBlobGeo, this.flatMat, true, true),
+      roof: new Batch(this.roofGeo, this.flatMat, true, false),
     };
     const { p0, p1 } = Terrain.chunkRange(i);
 
@@ -422,7 +701,31 @@ export class Decor {
       const singleFieldTree = hash3(i, side, this.terrain.seed + 79) < 0.3;
       let fieldTreePlaced = false;
       let vinesDone = false;
+      let groveDone = false;
       if (this.fenceOn(i, side)) this.addFence(b, i, i, side);
+      if (landscapeAt(p0) === 'greece' || landscapeAt(p1) === 'greece') this.addDryWall(b, i, i, side);
+      // One farmhouse per farmstead segment, in the chunk that holds its spot.
+      const seg = Math.floor(p0 / 100);
+      for (let k = seg; k <= seg + 1; k++) {
+        const hp = k * 100 + 30 + hash3(k, side, this.terrain.seed + 91) * 40;
+        if (hp < p0 || hp >= p1 || this.terrain.biomeAt(hp, side) !== 'farmstead') continue;
+        const hrng = mulberry32(subSeed(this.terrain.seed, 1900 + k, side + 2));
+        const hd = rand(hrng, 11, 17);
+        const hx = this.terrain.pathCenterX(hp) + side * hd;
+        if (Math.abs(hx) > CFG.chunk.halfWidth - 6) continue;
+        this.addHouse(b, i, hx, -hp, side, hrng);
+        placed.push([hx, -hp, 5]);
+        // Oleanders and a cypress by the house.
+        for (let o = 0; o < 3; o++) {
+          const ox = hx - side * rand(hrng, 3.5, 5);
+          const oz = -hp + rand(hrng, -5, 5);
+          this.addOleander(b, i, ox, oz, hrng);
+          placed.push([ox, oz, 1.2]);
+        }
+        const cz = -hp + (hrng() < 0.5 ? -1 : 1) * rand(hrng, 5, 7);
+        this.addCypress(b, i, hx + side * rand(hrng, -1, 2), cz, hrng);
+        placed.push([hx, cz, 1]);
+      }
 
       for (let k = 0; k < 260; k++) {
         const p = rand(rng, p0, p1);
@@ -498,6 +801,55 @@ export class Decor {
             }
             break;
           }
+          case 'phrygana': {
+            // Low scrub, limestone and the odd tree on a dry hillside.
+            const r = rng();
+            if (r < 0.2 && !tooClose(x, z, 1.0)) {
+              const bx = this.addBush(b, i, x, z, rng, rand(rng, 0.3, 0.62), CANOPY_COLORS.shrub);
+              placed.push([bx, z, 0.6]);
+            } else if (r < 0.25 && d > 2.4 && !tooClose(x, z, 1.4)) {
+              this.addRock(b, i, x, z, rng, d < 5 ? 0.7 : 1.2);
+              placed.push([x, z, 1]);
+            } else if (r < 0.262 && d > 5 && !tooClose(x, z, 4)) {
+              if (rng() < 0.5) this.addCypress(b, i, x, z, rng);
+              else this.addOliveTree(b, i, x, z, rng);
+              placed.push([x, z, 2]);
+            }
+            break;
+          }
+          case 'olive': {
+            if (!groveDone) {
+              groveDone = true;
+              this.addOliveGrove(b, i, i, side);
+            }
+            if (d > 3.8 && d < 5.5 && rng() < 0.05 && !tooClose(x, z, 1.5)) {
+              const bx = this.addBush(b, i, x, z, rng, rand(rng, 0.4, 0.7), CANOPY_COLORS.shrub);
+              placed.push([bx, z, 0.6]);
+            }
+            break;
+          }
+          case 'stubble': {
+            if (d > 34 && rng() < 0.2 && !tooClose(x, z, 3)) {
+              if (rng() < 0.5) this.addCypress(b, i, x, z, rng);
+              else this.addOliveTree(b, i, x, z, rng);
+              placed.push([x, z, 1.5]);
+            } else if (d > 6 && d < 30 && rng() < 0.012 && !tooClose(x, z, 3)) {
+              this.addHayBales(b, i, x, z, rng);
+              placed.push([x, z, 1.5]);
+            }
+            break;
+          }
+          case 'farmstead': {
+            if (d > 5 && rng() < 0.02 && !tooClose(x, z, 4)) {
+              if (rng() < 0.6) this.addFruitTree(b, i, x, z, rng);
+              else this.addOliveTree(b, i, x, z, rng);
+              placed.push([x, z, 2]);
+            } else if (d > 2.4 && rng() < 0.03 && !tooClose(x, z, 1.5)) {
+              const bx = this.addBush(b, i, x, z, rng, rand(rng, 0.4, 0.7), CANOPY_COLORS.shrub);
+              placed.push([bx, z, 0.6]);
+            }
+            break;
+          }
         }
       }
     }
@@ -533,5 +885,7 @@ interface Batches {
   farCone: Batch;
   farBlob: Batch;
   farBlobLod: Batch;
+  rock: Batch;
+  roof: Batch;
 }
 

@@ -231,6 +231,21 @@ try {
   const m3 = await state();
   check(m3.appleIndicator, `apple 75 m away in view is marked (indicator=${m3.appleIndicator})`);
 
+  // The landscape changes every 1000 m and loops back to the forest.
+  for (const [at, expected, name] of [[1150, 'greece', '05c-greece.png'], [1620, 'greece', '05d-greece-later.png'], [2150, 'forest', '05e-forest-again.png']]) {
+    await page.evaluate((p) => window.__appleKicker.teleport(p), at);
+    await look(0, -0.12);
+    await simulate(0.3);
+    await shot(name);
+    const sl = await state();
+    check(sl.landscape === expected, `landscape at ${at} m is ${expected} (${sl.landscape})`);
+  }
+  const rg = await walkAndKick('right', 320, 0);
+  check(rg.after.appleMax > 2150, `apple still moves after the landscapes looped (${rg.after.appleMax.toFixed(1)} m)`);
+  await page.evaluate(() => window.__appleKicker.teleport(1300));
+  const rg2 = await walkAndKick('right', 320, 0);
+  check(rg2.after.appleMax > 1300, `apple moves through Greek obstacles (${rg2.after.appleMax.toFixed(1)} m)`);
+
   // Storm catches the player (apple far ahead) → game over.
   await page.evaluate(() => {
     const g = window.__appleKicker.game;

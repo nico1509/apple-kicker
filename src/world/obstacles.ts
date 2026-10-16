@@ -2,9 +2,15 @@ import * as THREE from 'three';
 import { lerp, smoothstep } from '../utils/math';
 import { mulberry32, rand, subSeed, type Rng } from '../utils/noise';
 import { ColliderStore, SURFACES } from './colliders';
+import { LANDSCAPE_LENGTH, landscapeAt } from './landscape';
 import { Terrain } from './terrain';
 
-export type ObstacleKind = 'root' | 'branch' | 'log' | 'stone' | 'puddle';
+export type ObstacleKind =
+  | 'root' | 'branch' | 'log' | 'stone' | 'puddle'
+  // Greece
+  | 'wall' | 'rock' | 'scree' | 'sand';
+
+const WALL_COLORS = [0xbdb4a2, 0xa99f8c, 0xcfc6b2, 0x9a907e, 0xb5a088].map((h) => new THREE.Color(h));
 
 /**
  * Obstacles lie across the track and get denser and bigger with distance.
@@ -24,6 +30,11 @@ export class Obstacles {
     transparent: true,
     opacity: 0.85,
   });
+  // Greece: pale limestone, drystone walls and dusty sand.
+  private readonly limeMat = new THREE.MeshLambertMaterial({ color: 0xcdc7b6, flatShading: true });
+  private readonly wallMat = new THREE.MeshLambertMaterial({ color: 0xffffff, flatShading: true });
+  private readonly sandMat = new THREE.MeshLambertMaterial({ color: 0xdcc898 });
+  private readonly wallStoneGeo = new THREE.BoxGeometry(1, 1, 1);
   private readonly stoneGeo = new THREE.IcosahedronGeometry(1, 0);
   private readonly stubGeo = new THREE.CylinderGeometry(0.5, 1, 1, 5).translate(0, 0.5, 0);
 
@@ -33,8 +44,9 @@ export class Obstacles {
   ) {}
 
   dispose(): void {
-    for (const m of [this.rootMat, this.branchMat, this.logMat, this.logEndMat, this.stoneMat, this.puddleMat]) m.dispose();
+    for (const m of [this.rootMat, this.branchMat, this.logMat, this.logEndMat, this.stoneMat, this.puddleMat, this.limeMat, this.wallMat, this.sandMat]) m.dispose();
     this.stoneGeo.dispose();
+    this.wallStoneGeo.dispose();
     this.stubGeo.dispose();
   }
 
@@ -45,7 +57,13 @@ export class Obstacles {
   }
 
   private pickKind(p: number, rng: Rng): ObstacleKind {
-    const weights: Array<[ObstacleKind, number]> = [
+    const weights: Array<[ObstacleKind, number]> = landscapeAt(p) === 'greece' ? [
+      ['scree', 1.0],
+      ['wall', 1.1],
+      ['rock', 0.6],
+      ['branch', 0.35],
+      ['sand', 0.5],
+    ] : [
       ['root', 1.0],
       ['branch', 0.7],
       ['stone', p > 80 ? 0.55 : 0],
@@ -80,12 +98,17 @@ export class Obstacles {
       // A log at the foot of a descent traps the apple (it rolls back into the
       // log and cannot be chipped over from contact): use a root there.
       if (kind === 'log' && this.terrain.pathSlope(p) < -0.08) kind = 'root';
+      if (kind === 'wall' && this.terrain.pathSlope(p) < -0.08) kind = 'scree';
       switch (kind) {
         case 'root': this.addRoot(group, i, p, rng); break;
         case 'branch': this.addBranch(group, i, p, rng); break;
         case 'log': this.addLog(group, i, p, rng); break;
         case 'stone': this.addStone(group, i, p, rng); break;
         case 'puddle': this.addPuddle(group, i, p, rng); break;
+        case 'wall': this.addWall(group, i, p, rng); break;
+        case 'rock': this.addRock(group, i, p, rng); break;
+        case 'scree': this.addScree(group, i, p, rng); break;
+        case 'sand': this.addPuddle(group, i, p, rng, this.sandMat, 4); break;
       }
     }
     return group;
@@ -257,7 +280,8 @@ export class Obstacles {
     this.colliders.add(chunk, { kind: 'sphere', x, y, z, r: r * 1.05, surface: SURFACES.stone, blocksPlayer: r > 0.2 });
   }
 
-  private addPuddle(group: THREE.Group, chunk: number, p: number, rng: Rng): void {
+  /** A flat patch on the track that slows the apple: a puddle, or dusty sand in Greece. */
+  private addPuddle(group: THREE.Group, chunk: number, p: number, rng: Rng, material: THREE.Material = this.puddleMat, factor = 6): void {
     const cx = this.terrain.pathCenterX(p);
     const d = rng() < 0.6 ? (rng() < 0.5 ? -0.85 : 0.85) : rand(rng, -0.9, 0.9);
     const x = cx + d;
@@ -288,16 +312,120 @@ export class Obstacles {
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
     geo.computeVertexNormals();
-    const mesh = new THREE.Mesh(geo, this.puddleMat);
+    const mesh = new THREE.Mesh(geo, material);
     mesh.userData.ownGeometry = true;
     mesh.receiveShadow = true;
     group.add(mesh);
-    this.colliders.addMud(chunk, { x, z, rx: rx * 1.05, rz: rz * 1.05, angle, factor: 6 });
+    this.colliders.addMud(chunk, { x, z, rx: rx * 1.05, rz: rz * 1.05, angle, factor });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Greece
+
+  /** How far into the current landscape p lies (0 at its start). */
+  private static local(p: number): number {
+    return p - Math.floor(p / LANDSCAPE_LENGTH) * LANDSCAPE_LENGTH;
+  }
+
+  /**
+   * A low drystone wall across the track. Like a log it bounces the apple
+   * (chip it over) while the player can climb across.
+   */
+  private addWall(group: THREE.Group, chunk: number, p: number, rng: Rng): void {
+    const height = rand(rng, 0.28, 0.38) + 0.14 * smoothstep(0, 600, Obstacles.local(p));
+    const length = rand(rng, 2.4, 3.6);
+    const cx = this.terrain.pathCenterX(p);
+    const angle = this.terrain.pathHeading(p) + rand(rng, -0.25, 0.25); // across the lane
+    const d0 = rand(rng, -0.5, 0.5);
+    const dirX = Math.cos(angle);
+    const dirZ = -Math.sin(angle);
+    const ax = cx + d0 - (dirX * length) / 2;
+    const az = -p - (dirZ * length) / 2;
+    const bx = cx + d0 + (dirX * length) / 2;
+    const bz = -p + (dirZ * length) / 2;
+    // Stones in two or three courses, stacked along the wall line.
+    const courses = height > 0.4 ? 3 : 2;
+    const courseH = height / courses;
+    const perCourse = Math.round(length / 0.42);
+    const total = courses * perCourse;
+    const mesh = new THREE.InstancedMesh(this.wallStoneGeo, this.wallMat, total);
+    const m = new THREE.Matrix4();
+    const q = new THREE.Quaternion();
+    const e = new THREE.Euler();
+    const pos = new THREE.Vector3();
+    const scl = new THREE.Vector3();
+    let n = 0;
+    for (let c = 0; c < courses; c++) {
+      for (let k = 0; k < perCourse; k++) {
+        const t = (k + 0.5 + (c % 2) * 0.35) / perCourse;
+        if (t > 1) continue;
+        const x = ax + (bx - ax) * t;
+        const z = az + (bz - az) * t;
+        const y = this.terrain.groundHeight(x, z) + courseH * (c + 0.5) - 0.02;
+        pos.set(x + rand(rng, -0.02, 0.02), y, z + rand(rng, -0.02, 0.02));
+        scl.set((length / perCourse) * rand(rng, 0.88, 1.02), courseH * rand(rng, 0.9, 1.1), (0.42 - c * 0.04) * rand(rng, 0.9, 1.05));
+        e.set(rand(rng, -0.06, 0.06), angle + rand(rng, -0.1, 0.1), rand(rng, -0.06, 0.06), 'YXZ');
+        q.setFromEuler(e);
+        m.compose(pos, q, scl);
+        mesh.setMatrixAt(n, m);
+        mesh.setColorAt(n, WALL_COLORS[Math.floor(rng() * WALL_COLORS.length)]);
+        n++;
+      }
+    }
+    mesh.count = n;
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    mesh.computeBoundingSphere();
+    group.add(mesh);
+    const r = height / 2;
+    this.colliders.add(chunk, {
+      kind: 'capsule',
+      ax, ay: this.terrain.groundHeight(ax, az) + r, az,
+      bx, by: this.terrain.groundHeight(bx, bz) + r, bz,
+      r, surface: SURFACES.stone, blocksPlayer: false,
+    });
+  }
+
+  /** A limestone boulder on one half of the track; walk round it. */
+  private addRock(group: THREE.Group, chunk: number, p: number, rng: Rng): void {
+    const r = rand(rng, 0.32, 0.45) + 0.15 * smoothstep(0, 600, Obstacles.local(p));
+    const cx = this.terrain.pathCenterX(p);
+    const x = cx + (rng() < 0.5 ? -1 : 1) * rand(rng, 0.7, 1.2);
+    const z = -p;
+    const y = this.terrain.groundHeight(x, z) + r * 0.35;
+    const mesh = new THREE.Mesh(this.stoneGeo, this.limeMat);
+    mesh.position.set(x, y, z);
+    mesh.scale.set(r * rand(rng, 1.0, 1.3), r * rand(rng, 0.75, 0.95), r * rand(rng, 1.0, 1.3));
+    mesh.rotation.set(rand(rng, -0.4, 0.4), rng() * 6.28, rand(rng, -0.4, 0.4));
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    group.add(mesh);
+    this.colliders.add(chunk, { kind: 'sphere', x, y, z, r: r * 1.02, surface: SURFACES.stone, blocksPlayer: true });
+  }
+
+  /** Loose scree: a scatter of small stones that knock the apple off line. */
+  private addScree(group: THREE.Group, chunk: number, p: number, rng: Rng): void {
+    const cx = this.terrain.pathCenterX(p);
+    const count = 5 + Math.floor(rng() * 5);
+    for (let k = 0; k < count; k++) {
+      const r = rand(rng, 0.06, 0.13);
+      const x = cx + rand(rng, -1.4, 1.4);
+      const z = -p + rand(rng, -0.8, 0.8);
+      const y = this.terrain.groundHeight(x, z) + r * 0.4;
+      const mesh = new THREE.Mesh(this.stoneGeo, rng() < 0.6 ? this.limeMat : this.stoneMat);
+      mesh.position.set(x, y, z);
+      mesh.scale.set(r * rand(rng, 0.9, 1.4), r * rand(rng, 0.7, 1.0), r * rand(rng, 0.9, 1.4));
+      mesh.rotation.set(rng() * 3, rng() * 3, rng() * 3);
+      mesh.castShadow = true;
+      group.add(mesh);
+      this.colliders.add(chunk, { kind: 'sphere', x, y, z, r, surface: SURFACES.stone, blocksPlayer: false });
+    }
   }
 
   static disposeGroup(group: THREE.Group): void {
     group.traverse((o) => {
-      if (o instanceof THREE.Mesh && o.userData.ownGeometry) o.geometry.dispose();
+      if (o instanceof THREE.InstancedMesh) o.dispose();
+      else if (o instanceof THREE.Mesh && o.userData.ownGeometry) o.geometry.dispose();
     });
   }
 }
