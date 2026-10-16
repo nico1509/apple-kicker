@@ -178,7 +178,7 @@ export class Player {
       this.pos.x += this.vel.x * dt;
       this.pos.z += this.vel.z * dt;
       if (this.shoveX !== 0 || this.shoveZ !== 0) {
-        const f = 1 - Math.exp(-14 * dt);
+        const f = 1 - Math.exp(-8 * dt);
         this.pos.x += this.shoveX * f;
         this.pos.z += this.shoveZ * f;
         this.shoveX *= 1 - f;

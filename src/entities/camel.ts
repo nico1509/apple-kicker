@@ -9,14 +9,14 @@ export interface Camel {
   neck: THREE.Group;
   /** Marks the mouth, where the spit starts. */
   mouth: THREE.Object3D;
-  /** Seconds until the next spit while the player is in range. */
+  /** Seconds until the next spit while the player is in range (0: spit as soon as the player steps in). */
   timer: number;
 }
 
 /** Seconds between two spits of the same camel. */
-export const SPIT_INTERVAL = 3;
+export const SPIT_INTERVAL = 1;
 /** Metres the player is pushed along the flight direction of a spit that hits. */
-export const SPIT_PUSH = 1;
+export const SPIT_PUSH = 5;
 /** Within this distance (metres) the camel watches and spits at the player; beyond it the camel does nothing. */
 export const SPIT_RANGE = 10;
 const SPIT_GRAVITY = 9.81;
@@ -80,7 +80,7 @@ export class CamelFactory {
     const mouth = new THREE.Object3D();
     mouth.position.set(0, -0.06, 0.42);
     head.add(mouth);
-    return { group, neck, mouth, timer: rand(rng, 1.5, 2.2) };
+    return { group, neck, mouth, timer: 0 };
   }
 
   dispose(): void {
@@ -130,11 +130,15 @@ export class CamelSpit {
       const dx = p.x - g.position.x;
       const dz = p.z - g.position.z;
       const dist = Math.hypot(dx, dz);
-      if (dist > SPIT_RANGE) continue;
+      if (dist > SPIT_RANGE) {
+        // Out of range the camel rests; it spits at once when the player comes back.
+        camel.timer = 0;
+        continue;
+      }
       // Look at the player.
       let rel = Math.atan2(dx, dz) - g.rotation.y;
       rel = Math.atan2(Math.sin(rel), Math.cos(rel));
-      camel.neck.rotation.y = damp(camel.neck.rotation.y, clamp(rel, -NECK_LIMIT, NECK_LIMIT), 4, dt);
+      camel.neck.rotation.y = damp(camel.neck.rotation.y, clamp(rel, -NECK_LIMIT, NECK_LIMIT), 10, dt);
       if (!active || dist < 1.2) continue;
       camel.timer -= dt;
       if (camel.timer <= 0) {
