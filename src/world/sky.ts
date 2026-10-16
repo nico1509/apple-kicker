@@ -151,6 +151,9 @@ export class Sky {
    * @param stormAmount 0..1 how much the storm shows in the sky behind the player
    * @param stormGlobal 0..1 how far the whole sky has turned grey (front close)
    */
+  /** Share (0..1) of the cumulus clouds that are shown; the storm always brings them all. */
+  cloudAmount = 1;
+
   update(dt: number, camPos: THREE.Vector3, stormAmount: number, stormGlobal: number, flash: number): void {
     this.time += dt;
     this.mesh.position.copy(camPos);
@@ -159,6 +162,7 @@ export class Sky {
     for (let i = 0; i < this.clouds.children.length; i++) {
       const c = this.clouds.children[i];
       c.position.x += this.drift[i] * dt;
+      c.visible = i < Math.round(this.clouds.children.length * Math.max(this.cloudAmount, stormGlobal));
       if (c.position.x > 360) c.position.x -= 720;
     }
     this.uniforms.stormAmount.value = stormAmount;
