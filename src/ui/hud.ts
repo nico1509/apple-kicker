@@ -122,7 +122,7 @@ export class Hud {
 
   setStorm(dist: number, danger: number): void {
     const d = Math.max(0, dist);
-    const txt = window.innerWidth < 480 ? `${Math.round(d)} m` : `${Math.round(d)} m hinter dir`;
+    const txt = window.innerWidth < 480 ? `${Math.round(d)} m` : `${Math.round(d)} m hinter dem Apfel`;
     if (txt !== this.lastStorm) {
       this.lastStorm = txt;
       this.stormEl.textContent = txt;
@@ -179,8 +179,9 @@ export class Hud {
     this.hint.classList.toggle('faded', !v);
   }
 
-  /** Off-screen indicator pointing to the apple. */
-  setAppleIndicator(visible: boolean, x: number, y: number, angle: number, distance: number): void {
+  /** Marker pointing to the apple (off screen, or in view when it is far away). */
+  setAppleIndicator(visible: boolean, x: number, y: number, angle: number, distance: number, inView = false): void {
+    this.indicator.classList.toggle('in-view', visible && inView);
     if (visible !== this.lastIndicatorVisible) {
       this.lastIndicatorVisible = visible;
       this.indicator.hidden = !visible;
@@ -234,7 +235,7 @@ export class Hud {
     this.overlay.hidden = false;
     this.armedAt = performance.now() + 700;
     this.overlayContent.innerHTML = `
-      <h2>Vom Gewitter eingeholt!</h2>
+      <h2>Das Gewitter hat deinen Apfel eingeholt!</h2>
       <p class="score">Dein Apfel kam <b>${Math.floor(score)} m</b> weit.</p>
       ${isRecord ? '<p class="record">Neuer Rekord!</p>' : `<p>Rekord: <b>${Math.floor(best)} m</b></p>`}
       <button class="start" data-action="start">Nochmal versuchen</button>

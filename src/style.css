@@ -233,6 +233,11 @@ body {
   text-shadow: 0 1px 3px rgba(0, 0, 0, 0.7);
 }
 
+.apple-indicator.in-view {
+  /* Above the apple: label on top, chevron pointing down at it. */
+  flex-direction: column-reverse;
+}
+
 .apple-indicator .chevron {
   display: inline-block;
   font-size: 26px;

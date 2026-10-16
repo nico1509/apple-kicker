@@ -35,6 +35,7 @@ export const CFG = {
     restitution: 0.36,
     airDrag: 0.06,
     maxSpeed: 30,
+    markDistance: 50, // beyond this distance from the player the apple is always marked
   },
   kick: {
     maxDragPx: 320,

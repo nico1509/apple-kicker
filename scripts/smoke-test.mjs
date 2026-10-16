@@ -200,11 +200,47 @@ try {
   const r2 = await walkAndKick('right', 320, 0);
   check(r2.after.appleMax > 420, `apple still moves in the obstacle zone (${r2.after.appleMax.toFixed(1)} m)`);
 
-  // Storm catches up → game over.
+  // Far apple in view: marked once it is more than 50 m away.
+  const placeApple = (progress) =>
+    page.evaluate((p) => {
+      const g = window.__appleKicker.game;
+      g.apple.reset(g.world.terrain.pathCenterX(p), -p);
+      g.apple.maxProgress = Math.max(g.apple.maxProgress, p);
+    }, progress);
+  const lookAtApple = async () => {
+    const s = await state();
+    const ddx = s.applePx - s.playerX;
+    const ddz = s.applePz - s.playerZ;
+    const flat = Math.hypot(ddx, ddz);
+    await look(Math.atan2(-ddx, -ddz), Math.atan2(s.applePy - (s.playerY + 1.62), flat));
+    await simulate(0.05);
+  };
+  await page.evaluate(() => window.__appleKicker.teleport(300));
+  await simulate(0.3);
+  await placeApple(320);
+  await lookAtApple();
+  const m1 = await state();
+  check(!m1.appleIndicator, `apple 20 m away in view is not marked (indicator=${m1.appleIndicator})`);
+  await placeApple(375);
+  await lookAtApple();
+  const m2 = await state();
+  await shot('05b-far-apple-marked.png');
+  check(m2.appleIndicator, `apple 75 m away in view is marked (indicator=${m2.appleIndicator})`);
+
+  // The storm overtaking the player does not end the run – only the apple counts.
+  await page.evaluate(() => {
+    const g = window.__appleKicker.game;
+    g.storm.progress = g.player.progress + 5;
+  });
+  await simulate(1);
+  const o1 = await state();
+  check(o1.state === 'playing' && o1.stormPlayerDistance < 0 && o1.stormDistance > 0, `storm passing the player keeps the run going (player ${o1.stormPlayerDistance.toFixed(1)} m, apple ${o1.stormDistance.toFixed(1)} m)`);
+
+  // Storm catches the apple → game over.
   await simulate(70);
   const s3 = await state();
   await shot('06-storm.png');
-  check(s3.state === 'over', `storm ends the run (state=${s3.state}, dist=${s3.stormDistance.toFixed(1)})`);
+  check(s3.state === 'over' && s3.stormDistance <= 0, `storm catching the apple ends the run (state=${s3.state}, dist=${s3.stormDistance.toFixed(1)})`);
 
   // Restart works.
   await page.evaluate(() => window.__appleKicker.start());

@@ -68,6 +68,7 @@ export class Game {
   private tipStorm = false;
   private tipWhiff = false;
   private hintFaded = false;
+  private indicatorShown = false;
   private pointerLockWanted = false;
   private readonly rafLoop = (now: number): void => this.frame(now);
 
@@ -356,7 +357,7 @@ export class Game {
       this.world.update(this.player.pos.z);
       this.apple.update(dt);
     }
-    this.storm.update(dt, this.elapsed, this.player.pos, playing);
+    this.storm.update(dt, this.elapsed, this.player.pos, this.apple.progress, playing);
     const globalDark = this.globalDarkness();
     this.sky.update(dt, this.player.camera.getWorldPosition(this.tmp), this.storm.darkness, globalDark, this.storm.flash * (0.4 + 0.6 * globalDark));
     this.updateLighting();
@@ -366,7 +367,8 @@ export class Game {
     this.updateHud();
 
     if (playing) {
-      const dist = this.storm.distanceTo(this.player.progress);
+      // The run is lost when the storm catches the apple, not the player.
+      const dist = this.storm.distanceTo(this.apple.progress);
       if (dist <= 0) this.gameOver();
       if (!this.hintFaded && this.elapsed >= HINT_SECONDS) {
         this.hintFaded = true;
@@ -378,7 +380,7 @@ export class Game {
       }
       if (!this.tipStorm && dist < 40) {
         this.tipStorm = true;
-        this.hud.message('Das Gewitter holt auf – lauf!', 2500, 'bad');
+        this.hud.message('Das Gewitter holt deinen Apfel ein – kick ihn weiter!', 2500, 'bad');
       }
     }
   }
@@ -415,7 +417,7 @@ export class Game {
   private updateHud(): void {
     const hud = this.hud;
     hud.setDistance(this.apple.maxProgress, Math.max(this.best, this.apple.maxProgress));
-    const dist = this.storm.distanceTo(this.player.progress);
+    const dist = this.storm.distanceTo(this.apple.progress);
     hud.setStorm(dist, clamp(1 - dist / 110, 0, 1));
     hud.setStamina(this.player.stamina);
     hud.setVignette(this.storm.intensity * 0.8);
@@ -432,6 +434,7 @@ export class Game {
 
   private updateAppleIndicator(): void {
     if (this.state !== 'playing') {
+      this.indicatorShown = false;
       this.hud.setAppleIndicator(false, 0, 0, 0, 0);
       return;
     }
@@ -443,7 +446,20 @@ export class Game {
     v.project(cam);
     const behind = viewZ > 0;
     const onScreen = !behind && Math.abs(v.x) < 0.92 && Math.abs(v.y) < 0.9;
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+    const far = dist > CFG.apple.markDistance;
+    if (onScreen && far) {
+      // Far away the apple is only a few pixels: mark it in view too, with the
+      // marker sitting above it and pointing down at it.
+      const x = (v.x * 0.5 + 0.5) * w;
+      const y = (-v.y * 0.5 + 0.5) * h;
+      this.indicatorShown = true;
+      this.hud.setAppleIndicator(true, x, y - 34, Math.PI / 2, dist, true);
+      return;
+    }
     if (onScreen || dist < 2.2) {
+      this.indicatorShown = false;
       this.hud.setAppleIndicator(false, 0, 0, 0, 0);
       return;
     }
@@ -457,11 +473,10 @@ export class Game {
     const m = Math.max(Math.abs(sx), Math.abs(sy), 1e-4);
     sx /= m;
     sy /= m;
-    const w = window.innerWidth;
-    const h = window.innerHeight;
     const margin = 56;
     const x = w / 2 + sx * (w / 2 - margin);
     const y = h / 2 + sy * (h / 2 - margin);
+    this.indicatorShown = true;
     this.hud.setAppleIndicator(true, x, y, Math.atan2(sy, sx), dist);
   }
 
@@ -520,7 +535,9 @@ export class Game {
       playerYaw: this.player.yaw,
       playerPitch: this.player.pitch,
       stormProgress: this.storm.progress,
-      stormDistance: this.storm.distanceTo(this.player.progress),
+      stormDistance: this.storm.distanceTo(this.apple.progress),
+      stormPlayerDistance: this.storm.distanceTo(this.player.progress),
+      appleIndicator: this.indicatorShown,
       stormSpeed: this.storm.speed,
       pathAheadX: this.world.terrain.pathCenterX(this.apple.progress + 12),
       chunks: this.world.generated,

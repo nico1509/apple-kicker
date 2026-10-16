@@ -117,8 +117,8 @@ export class Storm {
     this.bolt.visible = false;
   }
 
-  distanceTo(playerProgress: number): number {
-    return playerProgress - this.progress;
+  distanceTo(progress: number): number {
+    return progress - this.progress;
   }
 
   private spawnDrop(i: number, anywhere: boolean): void {
@@ -141,11 +141,15 @@ export class Storm {
   /**
    * Advance the storm. When `advance` is false (menu, pause, game over) the
    * front line stays put but the visuals keep animating.
+   *
+   * The front chases the apple (`appleProgress`): its rubber band works on the
+   * apple's lead. Rain, darkness and lightning follow the player, who sees them.
    */
-  update(dt: number, elapsed: number, playerPos: THREE.Vector3, advance: boolean): void {
+  update(dt: number, elapsed: number, playerPos: THREE.Vector3, appleProgress: number, advance: boolean): void {
     this.time += dt;
     const playerProgress = -playerPos.z;
     const dist = this.distanceTo(playerProgress);
+    const appleDist = this.distanceTo(appleProgress);
 
     // ----- speed: slowly accelerating, capped, with a rubber band whose free
     // lead shrinks over the course of a run.
@@ -153,7 +157,7 @@ export class Storm {
     const cap = S.capBase + S.capGrowth * elapsed;
     let v = Math.min(cap, S.baseSpeed + S.accel * elapsed);
     const lead = Math.max(S.rubberBandMin, S.rubberBandDistance - S.rubberBandShrink * elapsed);
-    if (dist > lead) v += (dist - lead) * S.rubberBandGain;
+    if (appleDist > lead) v += (appleDist - lead) * S.rubberBandGain;
     this.speed = v;
     if (advance) this.progress += v * dt;
 
