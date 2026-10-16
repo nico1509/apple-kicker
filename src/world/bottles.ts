@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { CFG } from '../config';
-import { mulberry32, rand, subSeed } from '../utils/noise';
+import { mulberry32, rand, subSeed, type Rng } from '../utils/noise';
 import { sphereContact, type ColliderStore, type Contact } from './colliders';
 import { Terrain } from './terrain';
 
@@ -10,6 +10,9 @@ interface Bottle {
   baseY: number;
   phase: number;
 }
+
+/** Metres a bottle may be moved along the path to keep clear of an obstacle. */
+const NUDGE = 1.5;
 
 /** Height of the bottle model in metres (a bit larger than life so it reads from afar). */
 const HEIGHT = 0.5;
@@ -22,9 +25,9 @@ const PROFILE: Array<[number, number]> = [
 
 /**
  * Small bottles of apple spritzer that float along the path, slightly tilted
- * and spinning. Collecting one quenches the thirst. Bottles are placed per
- * chunk from the seed, so every run on the same world has them in the same
- * spots, in every landscape.
+ * and spinning. Collecting one quenches the thirst. Their spacing comes from
+ * the seed, so every run on the same world has them in the same spots, in
+ * every landscape.
  */
 export class Bottles {
   private readonly glassMat = new THREE.MeshStandardMaterial({
@@ -45,6 +48,9 @@ export class Bottles {
   private readonly chunks = new Map<number, Bottle[]>();
   /** Bottles already drunk in this world (they stay gone when a chunk is rebuilt). */
   private readonly taken = new Set<string>();
+  /** Progress of every bottle so far (see spot()). */
+  private readonly spots: number[] = [];
+  private readonly spotRng: Rng;
   private readonly contact: Contact = { nx: 0, ny: 0, nz: 0, depth: 0, surface: { restitution: 0, friction: 0 } };
 
   constructor(
@@ -56,6 +62,7 @@ export class Bottles {
     this.labelGeo = new THREE.CylinderGeometry(0.0615 * s, 0.0615 * s, 0.15 * s, 14, 1, true).translate(0, 0.115 * s, 0);
     this.neckGeo = new THREE.CylinderGeometry(0.0215 * s, 0.0235 * s, 0.03 * s, 12, 1, true).translate(0, 0.35 * s, 0);
     this.capGeo = new THREE.CylinderGeometry(0.0245 * s, 0.0245 * s, 0.016 * s, 12).translate(0, 0.395 * s, 0);
+    this.spotRng = mulberry32(subSeed(terrain.seed, 1699));
     this.labelTex = Bottles.makeLabelTexture();
     this.labelMat = new THREE.MeshStandardMaterial({
       map: this.labelTex,
@@ -102,26 +109,44 @@ export class Bottles {
     return tex;
   }
 
-  /** Builds the bottles of chunk i (at most one, never inside an obstacle). */
+  /**
+   * Progress of bottle k along the path. The gaps are drawn from the seed so
+   * that, after nudging round obstacles, two bottles are always between
+   * CFG.thirst.minGap and maxGap apart.
+   */
+  private spot(k: number): number {
+    const { firstBottle, minGap, maxGap } = CFG.thirst;
+    while (this.spots.length <= k) {
+      const prev = this.spots.length ? this.spots[this.spots.length - 1] : firstBottle - minGap - NUDGE;
+      this.spots.push(prev + rand(this.spotRng, minGap + 2 * NUDGE, maxGap - 2 * NUDGE));
+    }
+    return this.spots[k];
+  }
+
+  /** Builds the bottles of chunk i, each nudged a little if an obstacle is in the way. */
   buildChunk(i: number): THREE.Group {
     const group = new THREE.Group();
     group.name = `bottles-${i}`;
     const list: Bottle[] = [];
     this.chunks.set(i, list);
     const { p0, p1 } = Terrain.chunkRange(i);
-    if (p0 < CFG.thirst.firstBottle) return group;
     const rng = mulberry32(subSeed(this.terrain.seed, 1700 + i));
-    if (rng() > CFG.thirst.bottleChance) return group;
-    const key = `${i}`;
-    if (this.taken.has(key)) return group;
-    const start = rng();
-    // Try a few spots along the chunk until one is clear of obstacles.
-    for (let t = 0; t < 6; t++) {
-      const p = p0 + 4 + ((start + t * 0.17) % 1) * (p1 - p0 - 8);
-      const x = this.terrain.pathCenterX(p) + rand(rng, -0.4, 0.4);
-      const z = -p;
-      const gy = this.terrain.groundHeight(x, z);
-      if (!this.clear(x, gy, z)) continue;
+    for (let k = 0; this.spot(k) < p1; k++) {
+      const s = this.spot(k);
+      if (s < p0) continue;
+      const key = `${k}`;
+      if (this.taken.has(key)) continue;
+      const dx = rand(rng, -0.4, 0.4);
+      let x = 0;
+      let z = 0;
+      let gy = 0;
+      for (const off of [0, -0.75, 0.75, -NUDGE, NUDGE]) {
+        x = this.terrain.pathCenterX(s + off) + dx;
+        z = -(s + off);
+        gy = this.terrain.groundHeight(x, z);
+        if (this.clear(x, gy, z)) break;
+      }
+      // If every spot is blocked the bottle still floats there: the gap matters more.
       const pivot = new THREE.Group();
       // The bottle is centred on the tilt group, which leans it; the pivot spins it.
       const tilt = new THREE.Group();
@@ -139,7 +164,6 @@ export class Bottles {
       pivot.name = 'bottle';
       group.add(pivot);
       list.push({ key, pivot, baseY, phase: rng() * Math.PI * 2 });
-      break;
     }
     return group;
   }
