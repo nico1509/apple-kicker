@@ -39,6 +39,8 @@ export const SURFACES = {
   post: { restitution: 0.45, friction: 0.2 },
   fur: { restitution: 0.25, friction: 0.55 },
   metal: { restitution: 0.5, friction: 0.15 },
+  snow: { restitution: 0.15, friction: 0.6 },
+  ice: { restitution: 0.5, friction: 0.08 },
 } as const satisfies Record<string, Surface>;
 
 /** Result of a closest-point query against a collider. */
@@ -153,6 +155,13 @@ export class ColliderStore {
       this.mud.set(chunk, list);
     }
     list.push(m);
+  }
+
+  /** Remove one collider again (e.g. an icicle that melts away). */
+  remove(chunk: number, c: Collider): void {
+    const list = this.chunks.get(chunk);
+    const k = list ? list.indexOf(c) : -1;
+    if (list && k >= 0) list.splice(k, 1);
   }
 
   removeChunk(chunk: number): void {

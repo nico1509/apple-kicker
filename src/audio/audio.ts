@@ -181,6 +181,37 @@ export class AudioEngine {
     src.stop(t + 4);
   }
 
+  /** A deep, growling roar: the ice monster. */
+  roar(): void {
+    if (!this.ctx || !this.master) return;
+    const ctx = this.ctx;
+    const t = ctx.currentTime;
+    for (const [i, f] of [92, 138].entries()) {
+      const osc = ctx.createOscillator();
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(f, t);
+      osc.frequency.linearRampToValueAtTime(f * 1.25, t + 0.25);
+      osc.frequency.exponentialRampToValueAtTime(f * 0.6, t + 1.1);
+      const flt = ctx.createBiquadFilter();
+      flt.type = 'lowpass';
+      flt.frequency.value = 520;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(i === 0 ? 0.32 : 0.18, t + 0.12);
+      g.gain.exponentialRampToValueAtTime(0.0005, t + 1.2);
+      osc.connect(flt).connect(g).connect(this.master);
+      osc.start(t);
+      osc.stop(t + 1.25);
+    }
+    this.burst(0.9, 0.22, 'lowpass', 380, 0.5);
+  }
+
+  /** Ice cracking out of the ground. */
+  iceCrack(): void {
+    this.burst(0.12, 0.3, 'highpass', 3200, 1.2);
+    this.thump(420, 120, 0.08, 0.18);
+  }
+
   chime(): void {
     if (!this.ctx || !this.master) return;
     const ctx = this.ctx;
