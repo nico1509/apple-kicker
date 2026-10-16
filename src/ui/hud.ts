@@ -197,7 +197,10 @@ export class Hud {
     this.overlayKind = 'start';
     this.overlay.hidden = false;
     this.overlayContent.innerHTML = `
-      <h1>Apple <span>Kicker</span></h1>
+      <h1 class="logo" aria-label="Apple Kicker">
+        <img class="logo-apple" src="./favicon.svg" alt="" />
+        <span class="logo-words" aria-hidden="true"><span class="logo-apple-word">APPLE</span><span class="logo-kicker-word">KICKER</span></span>
+      </h1>
       <p class="tagline">Goldener Oktober, ein Apfel, ein Feldweg – und ein Gewitter im Nacken.</p>
       <div class="rules">
         <p>Kicke deinen Apfel so weit wie möglich den Weg entlang. Gezählt werden die Meter, die der <b>Apfel</b> zurücklegt.</p>
