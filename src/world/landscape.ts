@@ -1,0 +1,130 @@
+import * as THREE from 'three';
+import { CFG } from '../config';
+import { smoothstep } from '../utils/math';
+
+/**
+ * Landscapes change every LANDSCAPE_LENGTH metres along the path and loop:
+ * after the last one the first one (the autumn forest) comes back.
+ */
+export type Landscape = 'forest' | 'greece';
+
+export const LANDSCAPE_LENGTH = 1000;
+export const LANDSCAPES: readonly Landscape[] = ['forest', 'greece'];
+/** Half width (m) of the cross-fade of colours, light and backdrop at a landscape border. */
+const BLEND = 40;
+
+export interface LandscapeMix {
+  a: Landscape;
+  b: Landscape;
+  t: number; // 0 → a, 1 → b
+}
+
+const mod = (a: number, n: number): number => ((a % n) + n) % n;
+
+export function landscapeOfIndex(k: number): Landscape {
+  return LANDSCAPES[mod(k, LANDSCAPES.length)];
+}
+
+/** Landscape at progress p (hard border, used for everything that is placed discretely). */
+export function landscapeAt(p: number): Landscape {
+  return landscapeOfIndex(Math.floor(Math.max(0, p) / LANDSCAPE_LENGTH));
+}
+
+/** Blend between neighbouring landscapes over ±BLEND metres around every border. */
+export function landscapeMix(p: number, out: LandscapeMix = { a: 'forest', b: 'forest', t: 1 }): LandscapeMix {
+  const k = Math.floor(Math.max(0, p) / LANDSCAPE_LENGTH);
+  const local = Math.max(0, p) - k * LANDSCAPE_LENGTH;
+  if (k > 0 && local < BLEND) {
+    out.a = landscapeOfIndex(k - 1);
+    out.b = landscapeOfIndex(k);
+    out.t = smoothstep(-BLEND, BLEND, local);
+  } else if (local > LANDSCAPE_LENGTH - BLEND) {
+    out.a = landscapeOfIndex(k);
+    out.b = landscapeOfIndex(k + 1);
+    out.t = smoothstep(-BLEND, BLEND, local - LANDSCAPE_LENGTH);
+  } else {
+    out.a = out.b = landscapeOfIndex(k);
+    out.t = 1;
+  }
+  return out;
+}
+
+/** How much of landscape `which` is present at p (0..1). */
+export function landscapeWeight(p: number, which: Landscape): number {
+  const m = landscapeMix(p, scratch);
+  return (m.a === which ? 1 - m.t : 0) + (m.b === which ? m.t : 0);
+}
+const scratch: LandscapeMix = { a: 'forest', b: 'forest', t: 1 };
+
+/** Clear-weather light and sky colours of a landscape. */
+export interface Atmosphere {
+  horizon: THREE.Color;
+  top: THREE.Color;
+  hemiSky: THREE.Color;
+  hemiGround: THREE.Color;
+  sun: THREE.Color;
+  sunIntensity: number;
+  fogNear: number;
+  fogFar: number;
+  cirrus: number; // 0..1 amount of high cirrus streaks in the sky
+}
+
+export const ATMOSPHERES: Record<Landscape, Atmosphere> = {
+  // A clear October day.
+  forest: {
+    horizon: new THREE.Color(0xd3e4f3),
+    top: new THREE.Color(0x4f8fd6),
+    hemiSky: new THREE.Color(0xcfe3ff),
+    hemiGround: new THREE.Color(0x6b6a3a),
+    sun: new THREE.Color(0xfff1d6),
+    sunIntensity: 2.9,
+    fogNear: CFG.render.fogNear,
+    fogFar: CFG.render.fogFar,
+    cirrus: 1,
+  },
+  // Late summer in rural Greece: deep blue sky, dry clear air, warm light.
+  greece: {
+    horizon: new THREE.Color(0xc4dcf2),
+    top: new THREE.Color(0x2f78d8),
+    hemiSky: new THREE.Color(0xd6e6ff),
+    hemiGround: new THREE.Color(0x8a7a4a),
+    sun: new THREE.Color(0xfff0d0),
+    sunIntensity: 3.2,
+    fogNear: 90,
+    fogFar: 290,
+    cirrus: 0.3,
+  },
+};
+
+/** Writes the blended atmosphere at progress p into `out`. */
+export function atmosphereAt(p: number, out: Atmosphere): Atmosphere {
+  const m = landscapeMix(p, scratch);
+  const A = ATMOSPHERES[m.a];
+  const B = ATMOSPHERES[m.b];
+  const t = m.t;
+  out.horizon.copy(A.horizon).lerp(B.horizon, t);
+  out.top.copy(A.top).lerp(B.top, t);
+  out.hemiSky.copy(A.hemiSky).lerp(B.hemiSky, t);
+  out.hemiGround.copy(A.hemiGround).lerp(B.hemiGround, t);
+  out.sun.copy(A.sun).lerp(B.sun, t);
+  out.sunIntensity = A.sunIntensity + (B.sunIntensity - A.sunIntensity) * t;
+  out.fogNear = A.fogNear + (B.fogNear - A.fogNear) * t;
+  out.fogFar = A.fogFar + (B.fogFar - A.fogFar) * t;
+  out.cirrus = A.cirrus + (B.cirrus - A.cirrus) * t;
+  return out;
+}
+
+export function createAtmosphere(): Atmosphere {
+  const f = ATMOSPHERES.forest;
+  return {
+    horizon: f.horizon.clone(),
+    top: f.top.clone(),
+    hemiSky: f.hemiSky.clone(),
+    hemiGround: f.hemiGround.clone(),
+    sun: f.sun.clone(),
+    sunIntensity: f.sunIntensity,
+    fogNear: f.fogNear,
+    fogFar: f.fogFar,
+    cirrus: f.cirrus,
+  };
+}

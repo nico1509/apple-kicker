@@ -7,6 +7,7 @@ import { Player, type PlayerEvents } from './entities/player';
 import { Hud } from './ui/hud';
 import { clamp, lerp, smoothstep } from './utils/math';
 import { Storm } from './weather/storm';
+import { atmosphereAt, createAtmosphere, landscapeAt } from './world/landscape';
 import { Sky } from './world/sky';
 import { World } from './world/world';
 
@@ -27,13 +28,9 @@ export function detectQuality(): Quality {
 const BEST_KEY = 'apple-kicker-best';
 const HINT_SECONDS = 25;
 const SUN_DIR = new THREE.Vector3(0.55, 0.62, -0.5).normalize();
-const HORIZON_CLEAR = new THREE.Color(0xd3e4f3);
 const HORIZON_STORM = new THREE.Color(0x5f666f);
-const TOP_CLEAR = new THREE.Color(0x4f8fd6);
 const TOP_STORM = new THREE.Color(0x2e3540);
-const HEMI_SKY_CLEAR = new THREE.Color(0xcfe3ff);
 const HEMI_SKY_STORM = new THREE.Color(0x6f7782);
-const HEMI_GROUND_CLEAR = new THREE.Color(0x6b6a3a);
 const HEMI_GROUND_STORM = new THREE.Color(0x3a3d38);
 
 /**
@@ -58,6 +55,8 @@ export class Game {
   private readonly sun: THREE.DirectionalLight;
   private readonly hemi: THREE.HemisphereLight;
   private readonly fog: THREE.Fog;
+  /** Clear-weather light of the landscape the player is in. */
+  private readonly atmo = createAtmosphere();
   private lastTime = 0;
   private running = false;
   /** When true the animation loop only renders; time advances via simulate(). */
@@ -85,11 +84,11 @@ export class Game {
     this.renderer.shadowMap.enabled = quality !== 'low';
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
 
-    this.fog = new THREE.Fog(HORIZON_CLEAR.clone(), CFG.render.fogNear, CFG.render.fogFar);
+    this.fog = new THREE.Fog(this.atmo.horizon.clone(), this.atmo.fogNear, this.atmo.fogFar);
     this.scene.fog = this.fog;
     this.scene.background = null;
 
-    this.hemi = new THREE.HemisphereLight(HEMI_SKY_CLEAR, HEMI_GROUND_CLEAR, 1.15);
+    this.hemi = new THREE.HemisphereLight(this.atmo.hemiSky, this.atmo.hemiGround, 1.15);
     this.scene.add(this.hemi);
     this.sun = new THREE.DirectionalLight(0xfff1d6, 2.9);
     this.sun.castShadow = true;
@@ -406,17 +405,20 @@ export class Game {
   private updateLighting(): void {
     const dark = this.globalDarkness();
     const flash = this.storm.flash * (0.4 + 0.6 * dark);
-    this.sun.intensity = 2.9 * (1 - 0.92 * dark) + flash * 1.2;
+    const atmo = atmosphereAt(this.player.progress, this.atmo);
+    this.sun.intensity = atmo.sunIntensity * (1 - 0.92 * dark) + flash * 1.2;
+    this.sun.color.copy(atmo.sun);
     this.sun.shadow.intensity = 1 - 0.85 * dark;
     this.hemi.intensity = 1.15 * (1 - 0.35 * dark) + flash * 2.4;
-    this.hemi.color.copy(HEMI_SKY_CLEAR).lerp(HEMI_SKY_STORM, dark);
-    this.hemi.groundColor.copy(HEMI_GROUND_CLEAR).lerp(HEMI_GROUND_STORM, dark);
+    this.hemi.color.copy(atmo.hemiSky).lerp(HEMI_SKY_STORM, dark);
+    this.hemi.groundColor.copy(atmo.hemiGround).lerp(HEMI_GROUND_STORM, dark);
     this.renderer.toneMappingExposure = lerp(1.05, 0.8, dark);
-    this.fog.color.copy(HORIZON_CLEAR).lerp(HORIZON_STORM, dark);
-    this.fog.near = lerp(CFG.render.fogNear, 30, dark);
-    this.fog.far = lerp(CFG.render.fogFar, 150, dark);
-    this.sky.uniforms.horizonColor.value.copy(HORIZON_CLEAR).lerp(HORIZON_STORM, dark * 0.8);
-    this.sky.uniforms.topColor.value.copy(TOP_CLEAR).lerp(TOP_STORM, dark * 0.9);
+    this.fog.color.copy(atmo.horizon).lerp(HORIZON_STORM, dark);
+    this.fog.near = lerp(atmo.fogNear, 30, dark);
+    this.fog.far = lerp(atmo.fogFar, 150, dark);
+    this.sky.uniforms.horizonColor.value.copy(atmo.horizon).lerp(HORIZON_STORM, dark * 0.8);
+    this.sky.uniforms.topColor.value.copy(atmo.top).lerp(TOP_STORM, dark * 0.9);
+    this.sky.uniforms.cirrusAmount.value = atmo.cirrus;
     // Shadow-casting light follows the player.
     const p = this.player.pos;
     this.sun.position.set(p.x + SUN_DIR.x * 140, p.y + SUN_DIR.y * 140, p.z + SUN_DIR.z * 140);
@@ -552,6 +554,7 @@ export class Game {
       stormSpeed: this.storm.speed,
       pathAheadX: this.world.terrain.pathCenterX(this.apple.progress + 12),
       chunks: this.world.generated,
+      landscape: landscapeAt(this.player.progress),
       drawCalls: this.renderer.info.render.calls,
       triangles: this.renderer.info.render.triangles,
       seed: this.seed,

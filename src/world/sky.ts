@@ -19,6 +19,7 @@ uniform vec3 sunDir;
 uniform float stormAmount;
 uniform float stormGlobal;
 uniform float flash;
+uniform float cirrusAmount;
 varying vec3 vWorldPos;
 
 float hash21(vec2 p) {
@@ -46,7 +47,7 @@ void main() {
   uv = vec2(uv.x * 0.35 - uv.y * 0.15, uv.y * 0.9 + uv.x * 0.3);
   float n = vnoise(uv * 0.9) * 0.5 + vnoise(uv * 2.1 + 3.7) * 0.3 + vnoise(uv * 4.3 + 9.1) * 0.2;
   float cirrus = smoothstep(0.42, 0.72, n) * smoothstep(0.03, 0.25, h) * (1.0 - smoothstep(0.75, 1.0, h));
-  col = mix(col, vec3(0.93, 0.95, 0.98), cirrus * 0.7 * (1.0 - stormGlobal));
+  col = mix(col, vec3(0.93, 0.95, 0.98), cirrus * 0.7 * cirrusAmount * (1.0 - stormGlobal));
 
   // Sun disc and glow.
   float sd = max(dot(dir, sunDir), 0.0);
@@ -80,6 +81,7 @@ export class Sky {
     stormAmount: { value: number };
     stormGlobal: { value: number };
     flash: { value: number };
+    cirrusAmount: { value: number };
   };
   // No fog on the clouds (they would grey out against the un-fogged dome); the
   // emissive term lifts the undersides.
@@ -101,6 +103,7 @@ export class Sky {
       stormAmount: { value: 0 },
       stormGlobal: { value: 0 },
       flash: { value: 0 },
+      cirrusAmount: { value: 1 },
     };
     const mat = new THREE.ShaderMaterial({
       uniforms: this.uniforms,
