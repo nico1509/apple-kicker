@@ -200,7 +200,7 @@ try {
   const r2 = await walkAndKick('right', 320, 0);
   check(r2.after.appleMax > 420, `apple still moves in the obstacle zone (${r2.after.appleMax.toFixed(1)} m)`);
 
-  // Far apple in view: marked once it is more than 50 m away.
+  // Apple in view: marked once it is at least 5 m away.
   const placeApple = (progress) =>
     page.evaluate((p) => {
       const g = window.__appleKicker.game;
@@ -217,15 +217,19 @@ try {
   };
   await page.evaluate(() => window.__appleKicker.teleport(300));
   await simulate(0.3);
-  await placeApple(320);
+  await placeApple(303);
   await lookAtApple();
   const m1 = await state();
-  check(!m1.appleIndicator, `apple 20 m away in view is not marked (indicator=${m1.appleIndicator})`);
-  await placeApple(375);
+  check(!m1.appleIndicator, `apple 3 m away in view is not marked (indicator=${m1.appleIndicator})`);
+  await placeApple(308);
   await lookAtApple();
   const m2 = await state();
-  await shot('05b-far-apple-marked.png');
-  check(m2.appleIndicator, `apple 75 m away in view is marked (indicator=${m2.appleIndicator})`);
+  await shot('05b-apple-marked.png');
+  check(m2.appleIndicator, `apple 8 m away in view is marked (indicator=${m2.appleIndicator})`);
+  await placeApple(375);
+  await lookAtApple();
+  const m3 = await state();
+  check(m3.appleIndicator, `apple 75 m away in view is marked (indicator=${m3.appleIndicator})`);
 
   // Storm catches the player (apple far ahead) → game over.
   await page.evaluate(() => {
