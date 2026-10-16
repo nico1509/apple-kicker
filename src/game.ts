@@ -458,7 +458,7 @@ export class Game {
     const onScreen = !behind && Math.abs(v.x) < 0.92 && Math.abs(v.y) < 0.9;
     const w = window.innerWidth;
     const h = window.innerHeight;
-    const far = dist > CFG.apple.markDistance;
+    const far = dist >= CFG.apple.markDistance;
     if (onScreen && far) {
       // Far away the apple is only a few pixels: mark it in view too, with the
       // marker sitting above it and pointing down at it.
