@@ -23,8 +23,9 @@ export const CFG = {
     walkSpeed: 4.2,
     sprintSpeed: 6.6,
     accel: 22,
-    staminaMax: 6, // seconds of sprint
-    staminaRegen: 0.6, // seconds of stamina regained per second
+    staminaMax: 3, // seconds of sprint
+    staminaRegen: 0.3, // seconds of stamina regained per second (a tenth of the bar per second)
+    exhaustedSeconds: 1, // sprinting the stamina empty stops the player for this long, then it is full again
     pitchMin: -1.5,
     pitchMax: 1.1,
     lookSensitivity: 0.0022,
@@ -49,6 +50,16 @@ export const CFG = {
     chipSpeedFactor: 0.78,
     reach: 1.85, // metres from the hips to the apple
     curl: 0.12, // side spin per foot: a light, visible bend that keeps a straight kick on the lane
+  },
+  thirst: {
+    drainSeconds: 17.5, // a full thirst bar empties in this time
+    refill: 1, // one bottle fills the bar completely
+    warnBelow: 0.25,
+    firstBottle: 20, // no bottles on the first metres
+    bottleChance: 0.9, // chance of a bottle per chunk (32 m)
+    hoverHeight: 0.75, // centre of the bottle above the ground
+    tilt: 0.35, // radians the floating bottle leans
+    pickupRadius: 1.0,
   },
   storm: {
     startBehind: 58, // metres behind the start line

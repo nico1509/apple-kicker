@@ -11,6 +11,8 @@ export interface PlayerEvents {
   onKick(power: number, chip: boolean, foot: Foot): void;
   onWhiff(foot: Foot): void;
   onFootstep(sprinting: boolean): void;
+  /** Sprinted until the stamina ran empty: the player has to catch their breath. */
+  onExhausted(): void;
 }
 
 interface KickState {
@@ -41,6 +43,8 @@ export class Player {
   pitch = -0.2;
   stamina = 1;
   sprinting = false;
+  /** Seconds left in which the player is out of breath and cannot walk. */
+  exhausted = 0;
   private kick: KickState | null = null;
   private walkPhase = 0;
   private bob = 0;
@@ -99,6 +103,7 @@ export class Player {
     this.yaw = yaw;
     this.pitch = -0.25;
     this.stamina = 1;
+    this.exhausted = 0;
     this.kick = null;
     this.walkPhase = 0;
     this.bob = 0;
@@ -142,14 +147,14 @@ export class Player {
     const rgt = this.right(this.rgt);
     let mx = 0;
     let mz = 0;
-    if (!paused) {
+    if (!paused && this.exhausted <= 0) {
       if (input.isDown('KeyW') || input.isDown('ArrowUp')) mz += 1;
       if (input.isDown('KeyS') || input.isDown('ArrowDown')) mz -= 1;
       if (input.isDown('KeyD') || input.isDown('ArrowRight')) mx += 1;
       if (input.isDown('KeyA') || input.isDown('ArrowLeft')) mx -= 1;
     }
     const moving = mx !== 0 || mz !== 0;
-    const wantSprint = !paused && moving && (input.isDown('ShiftLeft') || input.isDown('ShiftRight')) && this.stamina > 0.02;
+    const wantSprint = !paused && moving && (input.isDown('ShiftLeft') || input.isDown('ShiftRight')) && this.stamina > 0;
     this.sprinting = wantSprint;
     if (paused) {
       // Freeze: no sliding, no stamina regeneration while the world stands still.
@@ -157,8 +162,17 @@ export class Player {
       this.intentX = 0;
       this.intentZ = 0;
     } else {
-      if (wantSprint) this.stamina = Math.max(0, this.stamina - dt / CFG.player.staminaMax);
-      else this.stamina = Math.min(1, this.stamina + (dt * CFG.player.staminaRegen) / CFG.player.staminaMax);
+      if (this.exhausted > 0) {
+        // Catching the breath fills the stamina bar completely within that second.
+        this.exhausted = Math.max(0, this.exhausted - dt);
+        this.stamina = 1 - this.exhausted / CFG.player.exhaustedSeconds;
+      } else if (wantSprint) {
+        this.stamina = Math.max(0, this.stamina - dt / CFG.player.staminaMax);
+        if (this.stamina <= 0) {
+          this.exhausted = CFG.player.exhaustedSeconds;
+          this.events.onExhausted();
+        }
+      } else this.stamina = Math.min(1, this.stamina + (dt * CFG.player.staminaRegen) / CFG.player.staminaMax);
 
       const slope = this.world.terrain.pathSlope(this.progress);
       const slopeFactor = clamp(1 - Math.max(0, slope) * 1.2, 0.55, 1);

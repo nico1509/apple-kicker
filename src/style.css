@@ -147,6 +147,69 @@ body {
   height: 52px;
 }
 
+.hud-left {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.panel.meter {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+}
+
+.meter .meter-icon {
+  width: 22px;
+  height: 26px;
+  flex: none;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.4));
+}
+
+.meter .bottle-icon {
+  transform: rotate(-12deg);
+}
+
+.meter-body {
+  flex: 1;
+}
+
+.panel.meter .bar {
+  height: 8px;
+  margin-top: 5px;
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.panel.meter .bar .fill {
+  height: 100%;
+  width: 100%;
+  transition: width 0.1s linear;
+}
+
+.panel.thirst .bar .fill {
+  background: linear-gradient(90deg, #e0a83c, #9bd36a);
+}
+
+.panel.stamina .bar .fill {
+  background: linear-gradient(90deg, #6fb6d9, #9bd36a);
+}
+
+.panel.meter.low .bar .fill {
+  background: var(--danger);
+}
+
+.panel.thirst.low,
+.panel.stamina.exhausted {
+  animation: pulse 0.7s infinite alternate;
+}
+
+.panel.stamina.exhausted {
+  background: rgba(70, 20, 14, 0.6);
+}
+
 .panel.storm {
   text-align: right;
   min-width: 210px;
@@ -199,25 +262,6 @@ body {
   align-items: center;
   gap: 10px;
   pointer-events: none;
-}
-
-.stamina {
-  width: 160px;
-  height: 5px;
-  background: rgba(0, 0, 0, 0.35);
-  border-radius: 3px;
-  overflow: hidden;
-}
-
-.stamina .fill {
-  height: 100%;
-  width: 100%;
-  background: #9bd36a;
-  transition: width 0.1s linear;
-}
-
-.stamina.low .fill {
-  background: var(--danger);
 }
 
 .crosshair {
@@ -628,10 +672,18 @@ button.choice.selected {
     gap: 8px;
   }
   .panel,
-  .panel.storm {
+  .panel.storm,
+  .hud-left {
     min-width: 0;
     flex: 1 1 0;
     padding: 8px 12px;
+  }
+  .hud-left {
+    padding: 0;
+    gap: 6px;
+  }
+  .hud-left .panel {
+    flex: none;
   }
   .panel .value {
     font-size: 22px;

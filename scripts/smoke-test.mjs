@@ -99,6 +99,8 @@ const wrap = (a) => ((a + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
  * (aimYaw = 0 is straight down the lane). Returns the states around the kick.
  */
 async function walkAndKick(foot, powerPx, aimYaw = 0, chip = false, shotName = null) {
+  // These runs are about kicking, not about drinking: keep the thirst bar full.
+  await page.evaluate(() => window.__appleKicker.game.debugThirst(1));
   // Let the apple come to rest first (it may still be rolling from the last kick).
   for (let i = 0; i < 6; i++) {
     if ((await state()).appleResting) break;
@@ -107,12 +109,22 @@ async function walkAndKick(foot, powerPx, aimYaw = 0, chip = false, shotName = n
   const s = await state();
   const ddx = s.applePx - s.playerX;
   const ddz = s.applePz - s.playerZ;
-  const yaw = Math.atan2(-ddx, -ddz);
+  let yaw = Math.atan2(-ddx, -ddz);
   await look(yaw, -0.55);
   const dist = Math.hypot(ddx, ddz);
-  // Sprint when it is far, walk the last bit.
-  if (dist > 6) await simulate((dist - 5) / 6.4, ['KeyW', 'ShiftLeft']);
-  const rest = Math.min(dist, 5);
+  // Sprint when it is far (but never the stamina empty: that leaves the player
+  // out of breath), walk the rest; re-aim and walk on if still too far.
+  let d = dist;
+  for (let leg = 0; leg < 8 && d > 6; leg++) {
+    const c = await state();
+    if (c.stamina > 0.15) await simulate(Math.min((d - 5) / 6.4, c.stamina * 3 - 0.3), ['KeyW', 'ShiftLeft']);
+    else await simulate(Math.min((d - 5) / 4.2, 2), ['KeyW']);
+    const n = await state();
+    d = Math.hypot(n.applePx - n.playerX, n.applePz - n.playerZ);
+    yaw = Math.atan2(-(n.applePx - n.playerX), -(n.applePz - n.playerZ));
+    await look(yaw, -0.55);
+  }
+  const rest = Math.min(d, 5);
   const walkTime = Math.max(0, (rest - 1.05) / 4.2);
   if (walkTime > 0) await simulate(walkTime, ['KeyW']);
   // Aim at the track centre 12 m ahead of the apple (plus the requested offset).
@@ -438,6 +450,65 @@ try {
   await simulate(0.2);
   const e5 = await state();
   check(e5.state === 'playing' && e5.lives === 3 && e5.appleMax < 1, 'restart gives all lives back');
+
+  // Thirst: the bar drains, bottles on the path refill half of it, empty costs a life.
+  check(e5.thirst > 0.98, `a run starts quenched (${e5.thirst.toFixed(3)})`);
+  await simulate(2);
+  const t0 = await state();
+  check(t0.thirst < 0.92 && t0.thirst > 0.85, `the thirst bar drains (${t0.thirst.toFixed(3)})`);
+  await page.evaluate(() => window.__appleKicker.teleport(300));
+  await simulate(0.1);
+  const bottles = await page.evaluate(() => window.__appleKicker.game.debugBottles());
+  const ahead = bottles.filter((b) => -b.z > 303).sort((a, b) => b.z - a.z);
+  check(ahead.length >= 3, `bottles float along the path ahead (${ahead.length})`);
+  const offPath = await page.evaluate(
+    (list) => Math.max(...list.map((b) => Math.abs(b.x - window.__appleKicker.game.world.terrain.pathCenterX(-b.z)))),
+    ahead,
+  );
+  check(offPath < 1, `bottles lie on the path (max ${offPath.toFixed(2)} m off centre)`);
+  const b0 = ahead[0];
+  await page.evaluate((b) => {
+    const g = window.__appleKicker.game;
+    g.player.reset(b.x, b.z + 2.2, 0);
+    g.debugLook(0, -0.5);
+    g.debugThirst(0.3);
+  }, b0);
+  await simulate(0.05);
+  await shot('13-bottle.png');
+  const drunk = (await state()).bottles;
+  await page.evaluate((b) => window.__appleKicker.game.player.reset(b.x, b.z, 0), b0);
+  await simulate(0.05);
+  const t1 = await state();
+  check(t1.bottles === drunk + 1 && t1.thirst > 0.98, `a bottle fills the bar completely (${t1.bottles - drunk}, ${t1.thirst.toFixed(3)})`);
+  await simulate(0.5);
+  const t1b = await state();
+  check(t1b.bottles === drunk + 1, 'a bottle can only be drunk once');
+  await page.evaluate(() => window.__appleKicker.game.debugThirst(0.005));
+  await simulate(0.5);
+  const t2 = await state();
+  check(t2.state === 'lifelost' && t2.lives === 2, `dying of thirst costs a life (${t2.state}, ${t2.lives} left)`);
+  check((await page.textContent('.overlay-content')).includes('verdurstet'), 'the panel says you died of thirst');
+  await shot('14-thirst-lifelost.png');
+  await page.evaluate(() => window.__appleKicker.start());
+  await simulate(0.1);
+  check((await state()).thirst > 0.99, 'continuing quenches the thirst again');
+
+  // Sprinting the stamina empty stops the player for a second.
+  await page.evaluate(() => {
+    window.__appleKicker.game.player.stamina = 0.03;
+  });
+  await simulate(0.4, ['KeyW', 'ShiftLeft']);
+  const x0 = await state();
+  check(x0.exhausted > 0.5, `empty stamina leaves the player out of breath (${x0.exhausted.toFixed(2)} s)`);
+  check((await page.textContent('.message')).includes('Puste'), 'a hint says the player is out of breath');
+  await simulate(0.4, ['KeyW']);
+  const x1 = await state();
+  check(Math.abs(x1.playerZ - x0.playerZ) < 0.3, `out of breath the player cannot walk (${(x0.playerZ - x1.playerZ).toFixed(2)} m)`);
+  await simulate(0.5);
+  await simulate(0.6, ['KeyW']);
+  const x2 = await state();
+  check(x1.stamina > 0.55 && x1.stamina < 0.85, `catching the breath refills the stamina (${x1.stamina.toFixed(2)})`);
+  check(x2.exhausted === 0 && x2.stamina > 0.95 && x2.playerZ < x1.playerZ - 0.6, `after a second the player walks again (${(x1.playerZ - x2.playerZ).toFixed(2)} m)`);
 
   // Frame rate estimate (software rendering, so only a rough sanity figure).
   const fps = await page.evaluate(
