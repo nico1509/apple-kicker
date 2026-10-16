@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { AudioEngine } from './audio/audio';
 import { CFG, type Foot } from './config';
 import { Apple } from './entities/apple';
+import { CamelSpit, SPIT_PUSH, type Camel } from './entities/camel';
 import { Input } from './entities/input';
 import { Player, type PlayerEvents } from './entities/player';
 import { EASY_LIVES, Hud, type Cause, type Difficulty } from './ui/hud';
@@ -49,6 +50,7 @@ export class Game {
   readonly audio = new AudioEngine();
   readonly sky: Sky;
   readonly storm: Storm;
+  readonly spit: CamelSpit;
   world: World;
   player!: Player;
   apple!: Apple;
@@ -128,6 +130,8 @@ export class Game {
       onThunder: (v) => this.audio.thunder(this.state === 'playing' ? v : v * 0.5),
     });
 
+    this.spit = new CamelSpit(this.scene, (x, z) => this.world.groundHeight(x, z));
+
     this.playerEvents = {
       onKick: (power, chip) => {
         this.audio.kick(power);
@@ -198,6 +202,7 @@ export class Game {
     this.player.reset(this.world.terrain.pathCenterX(0), 0, 0);
     this.apple.reset(this.world.terrain.pathCenterX(APPLE_AHEAD), -APPLE_AHEAD);
     this.storm.reset();
+    this.spit.clear();
     this.elapsed = 0;
     this.lives = this.maxLives();
     this.quench();
@@ -573,6 +578,12 @@ export class Game {
     this.world.bottles.animate(this.animTime);
 
     this.player.update(dt, this.apple, !playing);
+    this.spit.update(dt, this.camels(), this.player, playing, (dx, dz) => {
+      // A hit pushes the player along the flight direction of the spit.
+      this.player.shove(dx * SPIT_PUSH, dz * SPIT_PUSH);
+      this.audio.hit(0.5);
+      this.hud.message('Angespuckt!', 1100, 'bad');
+    });
     if (playing) {
       this.world.update(this.player.pos.z);
       this.apple.update(dt);
@@ -627,6 +638,10 @@ export class Game {
     if (this.thirst <= 0) this.caught('thirst');
   }
 
+  private *camels(): Generator<Camel> {
+    for (const list of this.world.obstacles.camels.values()) yield* list;
+  }
+
   /** True when the apple is further back than the player, i.e. the storm reaches it first. */
   private appleTrails(): boolean {
     return this.apple.progress < this.player.progress;
@@ -662,6 +677,7 @@ export class Game {
     this.sky.uniforms.horizonColor.value.copy(atmo.horizon).lerp(HORIZON_STORM, dark * 0.8);
     this.sky.uniforms.topColor.value.copy(atmo.top).lerp(TOP_STORM, dark * 0.9);
     this.sky.uniforms.cirrusAmount.value = atmo.cirrus;
+    this.sky.cloudAmount = atmo.clouds;
     // Shadow-casting light follows the player.
     const p = this.player.pos;
     this.sun.position.set(p.x + SUN_DIR.x * 140, p.y + SUN_DIR.y * 140, p.z + SUN_DIR.z * 140);
@@ -836,6 +852,7 @@ export class Game {
     this.apple.dispose();
     this.player.dispose();
     this.storm.dispose();
+    this.spit.dispose();
     this.sky.dispose();
     this.renderer.dispose();
   }

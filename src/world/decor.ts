@@ -61,6 +61,8 @@ const CANOPY_COLORS = {
   dryTuft: [C(0xd2bd76), C(0xc4ad62), C(0xb39c58), C(0x9aa050)],
   pebble: [C(0xd8d2c2), C(0xc2bcab), C(0xe2dccb)],
   farGreece: [C(0x56663a), C(0x4a5a33), C(0x6a7442), C(0x7e7a44)],
+  palm: [C(0x5f8a34), C(0x6f9a3c), C(0x4f7a2c), C(0x7a9a40)],
+  desertShrub: [C(0x8a8a4a), C(0x9a8e52), C(0x7a7a40), C(0xa49060)],
 };
 const ROCK_COLORS = [C(0xc9c3b3), C(0xb4ae9f), C(0xd8d2c2), C(0xa8a293)];
 const OLIVE_TRUNK_COLORS = [C(0x8a7f6c), C(0x978b76), C(0x7b715f)];
@@ -71,6 +73,13 @@ const WOOD_DARK = C(0x5d4a38);
 const HAY = [C(0xd9bf6c), C(0xcdb05c), C(0xe0c87a)];
 const SAIL_CLOTH = C(0xf4f1e8);
 const SAIL_SPOKE = C(0x8a7f70);
+const PALM_TRUNK_COLORS = [C(0x8a6a44), C(0x7a5c3a), C(0x96764c)];
+const PALM_DRY = [C(0xa88a4a), C(0x96783e)];
+const DATES = [C(0xc8742a), C(0xb05a22)];
+const MUD_BRICK = [C(0xc9a46c), C(0xd4b07a), C(0xbf9860)];
+const SANDSTONE = [C(0xd8b47a), C(0xcda66a), C(0xe0c08a)];
+const BASALT = [C(0x3e332c), C(0x4a3d34), C(0x352b25)];
+const PYRAMID = [C(0xd8b072), C(0xcfa566)];
 const TRUNK_COLORS = [C(0x6b4d33), C(0x7a5a3c), C(0x5a4330)];
 const POST_COLOR = C(0x8a7a62);
 const RAIL_COLOR = C(0x9c8a6b);
@@ -90,6 +99,7 @@ export class Decor {
   private readonly farConeGeo: THREE.BufferGeometry;
   private readonly farBlobGeo: THREE.BufferGeometry;
   private readonly roofGeo: THREE.BufferGeometry;
+  private readonly pyramidGeo: THREE.BufferGeometry;
 
   private readonly m = new THREE.Matrix4();
   private readonly q = new THREE.Quaternion();
@@ -118,12 +128,14 @@ export class Decor {
     roof.lineTo(0, 1);
     roof.lineTo(-0.5, 0);
     this.roofGeo = new THREE.ExtrudeGeometry(roof, { depth: 1, bevelEnabled: false }).translate(0, 0, -0.5);
+    // Square pyramid, edges aligned with the axes, base on y = 0.
+    this.pyramidGeo = new THREE.ConeGeometry(Math.SQRT2 / 2, 1, 4, 1).rotateY(Math.PI / 4).translate(0, 0.5, 0);
   }
 
   dispose(): void {
     for (const g of [
       this.trunkGeo, this.canopyGeo, this.coneGeo, this.bushGeo,
-      this.boxGeo, this.leafGeo, this.tuftGeo, this.farConeGeo, this.farBlobGeo, this.roofGeo,
+      this.boxGeo, this.leafGeo, this.tuftGeo, this.farConeGeo, this.farBlobGeo, this.roofGeo, this.pyramidGeo,
     ]) g.dispose();
     this.flatMat.dispose();
     this.leafMat.dispose();
@@ -362,6 +374,7 @@ export class Decor {
       const z = -p;
       const y = this.terrain.groundHeight(x, z) + 0.012;
       const s = rand(rng, 0.05, 0.1);
+      if (rng() < landscapeWeight(p, 'desert')) continue;
       const greek = rng() < landscapeWeight(p, 'greece');
       if (greek) this.place(b.leaf, x, y, z, s * 0.6, 1, s * 0.5, rng() * 6.28, this.pickColor(CANOPY_COLORS.pebble, rng, 0.08));
       else this.place(b.leaf, x, y, z, s, 1, s * rand(rng, 0.6, 1), rng() * 6.28, this.pickColor(CANOPY_COLORS.leaf, rng, 0.1));
@@ -394,7 +407,9 @@ export class Decor {
       else if (biome === 'forest' || biome === 'stubble') d = rand(rng, 1.3, 2.6);
       else if (biome === 'olive') d = rand(rng, 1.3, 3.0);
       else d = rand(rng, 1.3, 30);
-      const dry = biome === 'phrygana' || biome === 'olive' || biome === 'stubble' || biome === 'farmstead';
+      if ((biome === 'dunes' && rng() < 0.75) || (biome === 'blackdesert' && rng() < 0.85)) continue;
+      const dry = biome === 'phrygana' || biome === 'olive' || biome === 'stubble' || biome === 'farmstead'
+        || biome === 'dunes' || biome === 'blackdesert' || biome === 'ruins';
       const x = this.terrain.pathCenterX(p) + side * d;
       const z = -p;
       const y = this.terrain.groundHeight(x, z) - 0.02;
@@ -412,6 +427,10 @@ export class Decor {
       if (landscapeAt(pm) === 'greece' && rng() < 0.14) {
         this.addWindmills(b, side * rand(rng, 58, 120), rand(rng, zFar + 8, zNear), side, rng);
       }
+      // Pyramids on the desert horizon.
+      if (landscapeAt(pm) === 'desert' && rng() < 0.09) {
+        this.addPyramids(b, side * rand(rng, 150, 230), rand(rng, zFar, zNear), side, rng);
+      }
       for (let k = 0; k < 230; k++) {
         const ax = rand(rng, CFG.chunk.halfWidth + 3, CFG.chunk.farExtent - 10);
         const x = side * ax;
@@ -427,6 +446,14 @@ export class Decor {
             const s = rand(rng, 1.8, 3.6);
             this.place(ax < 100 ? b.farBlob : b.farBlobLod, x, y + s * 0.3, z, s, s * 0.6, s, rng() * 6.28, this.pickColor(CANOPY_COLORS.farGreece, rng, 0.12));
           }
+          continue;
+        }
+        if (rng() < landscapeWeight(-z, 'desert')) {
+          // A few dark rocks on the distant dunes.
+          if (rng() < 0.85) continue;
+          const y = this.terrain.groundHeight(x, z) - 0.3;
+          const s = rand(rng, 1.5, 4);
+          this.place(ax < 100 ? b.farBlob : b.farBlobLod, x, y, z, s, s * 0.5, s, rng() * 6.28, this.pickColor(BASALT, rng, 0.1));
           continue;
         }
         // Leave meadow clearings in the distant hills.
@@ -502,11 +529,11 @@ export class Decor {
   }
 
   /** A pale limestone boulder (with a smaller one or two beside it). */
-  private addRock(b: Batches, chunk: number, x: number, z: number, rng: Rng, scale = 1): void {
+  private addRock(b: Batches, chunk: number, x: number, z: number, rng: Rng, scale = 1, colors = ROCK_COLORS): void {
     const r = rand(rng, 0.3, 0.85) * scale;
     x = this.clearOfLane(x, z, r * 1.3);
     const y = this.terrain.groundHeight(x, z) + r * 0.2;
-    this.place(b.rock, x, y, z, r * rand(rng, 1.0, 1.4), r * rand(rng, 0.6, 0.9), r * rand(rng, 1.0, 1.3), rng() * 6.28, this.pickColor(ROCK_COLORS, rng, 0.05), rand(rng, -0.3, 0.3), rand(rng, -0.3, 0.3));
+    this.place(b.rock, x, y, z, r * rand(rng, 1.0, 1.4), r * rand(rng, 0.6, 0.9), r * rand(rng, 1.0, 1.3), rng() * 6.28, this.pickColor(colors, rng, 0.05), rand(rng, -0.3, 0.3), rand(rng, -0.3, 0.3));
     this.colliders.add(chunk, { kind: 'sphere', x, y, z, r: r * 0.95, surface: SURFACES.stone, blocksPlayer: r > 0.35 });
     const extra = Math.floor(rng() * 3);
     for (let k = 0; k < extra; k++) {
@@ -515,7 +542,7 @@ export class Decor {
       const sx = this.clearOfLane(x + Math.cos(a) * r * 1.3, z, rs);
       const sz = z + Math.sin(a) * r * 1.3;
       const sy = this.terrain.groundHeight(sx, sz) + rs * 0.2;
-      this.place(b.rock, sx, sy, sz, rs * 1.2, rs * 0.8, rs, rng() * 6.28, this.pickColor(ROCK_COLORS, rng, 0.05));
+      this.place(b.rock, sx, sy, sz, rs * 1.2, rs * 0.8, rs, rng() * 6.28, this.pickColor(colors, rng, 0.05));
       this.colliders.add(chunk, { kind: 'sphere', x: sx, y: sy, z: sz, r: rs * 0.95, surface: SURFACES.stone, blocksPlayer: false });
     }
   }
@@ -668,6 +695,128 @@ export class Decor {
     }
   }
 
+
+  // ---------------------------------------------------------------------------
+  // The Egyptian desert
+
+  /** A date palm: a slightly bent, ringed trunk under a crown of drooping fronds. */
+  private addPalm(b: Batches, chunk: number, x: number, z: number, rng: Rng): void {
+    const y0 = this.terrain.groundHeight(x, z) - 0.1;
+    const h = rand(rng, 5, 8.5);
+    const segs = 5;
+    const leanA = rng() * Math.PI * 2;
+    const lean = rand(rng, 0.04, 0.16);
+    let px = x;
+    let py = y0;
+    let pz = z;
+    for (let k = 0; k < segs; k++) {
+      const t = lean * (0.5 + k / segs);
+      const tx = Math.cos(leanA) * t;
+      const tz = Math.sin(leanA) * t;
+      const sh = h / segs + 0.12;
+      const r = 0.22 - k * 0.015;
+      this.place(b.trunk, px, py, pz, r, sh, r, 0, this.pickColor(PALM_TRUNK_COLORS, rng, 0.05), tx, tz);
+      // The next ring starts where this one ends (local up after the tilt, see place()).
+      const len = sh - 0.12;
+      px += -Math.sin(tz) * len;
+      py += Math.cos(tz) * Math.cos(tx) * len;
+      pz += Math.cos(tz) * Math.sin(tx) * len;
+    }
+    // Crown.
+    const fronds = 10 + Math.floor(rng() * 4);
+    for (let k = 0; k < fronds; k++) {
+      const yaw = (k / fronds) * Math.PI * 2 + rand(rng, -0.2, 0.2);
+      const outer = k % 2 === 0;
+      const tilt = outer ? rand(rng, 1.75, 2.1) : rand(rng, 1.0, 1.4);
+      const len = rand(rng, 2.0, 2.8) * (outer ? 1 : 0.8);
+      const dry = outer && rng() < 0.15;
+      this.place(b.box, px, py, pz, 0.5, len, 0.05, yaw, this.pickColor(dry ? PALM_DRY : CANOPY_COLORS.palm, rng, 0.08), tilt);
+    }
+    // Dates.
+    for (let k = 0; k < 3; k++) {
+      const a = rng() * Math.PI * 2;
+      this.place(b.bush, px + Math.cos(a) * 0.3, py - 0.35, pz + Math.sin(a) * 0.3, 0.16, 0.24, 0.16, 0, this.pickColor(DATES, rng, 0.05));
+    }
+    this.colliders.add(chunk, { kind: 'cylinder', x, z, r: 0.3, yTop: y0 + h, surface: SURFACES.trunk, blocksPlayer: true });
+  }
+
+  /** Crumbling mud-brick walls of an old settlement, with a broken top edge. */
+  private addRuin(b: Batches, chunk: number, x: number, z: number, rng: Rng): void {
+    const yaw = this.terrain.pathHeading(-z) + (rng() < 0.5 ? 0 : Math.PI / 2) + rand(rng, -0.1, 0.1);
+    const c = Math.cos(yaw);
+    const sn = Math.sin(yaw);
+    const len = rand(rng, 5, 10);
+    const pieces = Math.round(len / 1.2);
+    const thick = 0.6;
+    const baseH = rand(rng, 1.6, 3.0);
+    for (let k = 0; k < pieces; k++) {
+      if (rng() < 0.15) continue; // a gap, like a doorway or a collapsed bit
+      const t = -len / 2 + (k + 0.5) * (len / pieces);
+      const wx = x + t * sn;
+      const wz = z + t * c;
+      const y = this.terrain.groundHeight(wx, wz) - 0.2;
+      const hh = baseH * rand(rng, 0.45, 1.0);
+      this.place(b.box, wx, y, wz, thick, hh + 0.2, len / pieces + 0.02, yaw, this.pickColor(MUD_BRICK, rng, 0.04));
+      this.colliders.add(chunk, { kind: 'cylinder', x: wx, z: wz, r: 0.6, yTop: y + hh, surface: SURFACES.stone, blocksPlayer: true });
+    }
+    // A return wall at one end.
+    if (rng() < 0.6) {
+      const end = (rng() < 0.5 ? -1 : 1) * len / 2;
+      const ex = x + end * sn;
+      const ez = z + end * c;
+      const rl = rand(rng, 2, 4);
+      const mx = ex + (rl / 2) * c;
+      const mz = ez - (rl / 2) * sn;
+      const y = this.terrain.groundHeight(mx, mz) - 0.2;
+      const hh = baseH * rand(rng, 0.5, 0.9);
+      this.place(b.box, mx, y, mz, rl, hh + 0.2, thick, yaw, this.pickColor(MUD_BRICK, rng, 0.04));
+      this.colliders.add(chunk, { kind: 'cylinder', x: mx, z: mz, r: rl / 2, yTop: y + hh, surface: SURFACES.stone, blocksPlayer: true });
+    }
+  }
+
+  /** A sandstone column, often broken off, sometimes with its capital. */
+  private addColumn(b: Batches, chunk: number, x: number, z: number, rng: Rng): void {
+    const y = this.terrain.groundHeight(x, z) - 0.15;
+    const r = rand(rng, 0.35, 0.5);
+    const intact = rng() < 0.35;
+    const h = intact ? rand(rng, 4, 5.5) : rand(rng, 0.8, 3.2);
+    this.place(b.trunk, x, y, z, r, h, r, rng() * 6.28, this.pickColor(SANDSTONE, rng, 0.04));
+    if (intact) this.place(b.box, x, y + h - 0.05, z, r * 2.6, 0.4, r * 2.6, rng() * 6.28, this.pickColor(SANDSTONE, rng, 0.04));
+    this.colliders.add(chunk, { kind: 'cylinder', x, z, r: r + 0.05, yTop: y + h, surface: SURFACES.stone, blocksPlayer: true });
+  }
+
+  /** A fallen sandstone block, half sunk into the sand. */
+  private addBlock(b: Batches, chunk: number, x: number, z: number, rng: Rng): void {
+    const s = rand(rng, 0.5, 1.1);
+    x = this.clearOfLane(x, z, s * 0.8);
+    const y = this.terrain.groundHeight(x, z) - s * 0.25;
+    this.place(b.box, x, y, z, s * rand(rng, 1, 1.6), s * rand(rng, 0.6, 0.9), s, rng() * 6.28, this.pickColor(SANDSTONE, rng, 0.05), rand(rng, -0.15, 0.15), rand(rng, -0.15, 0.15));
+    this.colliders.add(chunk, { kind: 'cylinder', x, z, r: s * 0.6, yTop: y + s * 0.8, surface: SURFACES.stone, blocksPlayer: s > 0.6 });
+  }
+
+  /** A dark, cone-shaped hill of the black desert. */
+  private addBasaltCone(b: Batches, chunk: number, x: number, z: number, rng: Rng): void {
+    const r = rand(rng, 2, 4.5);
+    const h = r * rand(rng, 0.6, 0.9);
+    const y = this.terrain.groundHeight(x, z) - 0.4;
+    this.place(b.cone, x, y, z, r, h, r, rng() * 6.28, this.pickColor(BASALT, rng, 0.06));
+    this.colliders.add(chunk, { kind: 'cylinder', x, z, r: r * 0.7, yTop: y + h * 0.6, surface: SURFACES.stone, blocksPlayer: true });
+  }
+
+  /** A group of pyramids on the horizon. */
+  private addPyramids(b: Batches, x: number, z: number, side: Side, rng: Rng): void {
+    const count = 1 + Math.floor(rng() * 3);
+    let px = x;
+    let pz = z;
+    for (let k = 0; k < count; k++) {
+      const base = rand(rng, 22, 42) * (k === 0 ? 1 : 0.75);
+      const y = this.terrain.groundHeight(px, pz) - 3;
+      this.place(b.pyramid, px, y, pz, base, base * 1.25, base, 0, this.pickColor(PYRAMID, rng, 0.03));
+      px += side * rand(rng, 10, 40);
+      pz -= base * rand(rng, 1.4, 2.0);
+    }
+  }
+
   // ---------------------------------------------------------------------------
 
   /** Build all decoration for chunk i. Also registers the colliders. */
@@ -686,6 +835,7 @@ export class Decor {
       farBlobLod: new Batch(this.farBlobGeo, this.flatMat, false, false),
       rock: new Batch(this.farBlobGeo, this.flatMat, true, true),
       roof: new Batch(this.roofGeo, this.flatMat, true, false),
+      pyramid: new Batch(this.pyramidGeo, this.flatMat, false, false),
     };
     const { p0, p1 } = Terrain.chunkRange(i);
 
@@ -839,6 +989,54 @@ export class Decor {
             }
             break;
           }
+          case 'dunes': {
+            // Mostly bare sand: the odd dry shrub or a lone palm.
+            const r = rng();
+            if (r < 0.04 && !tooClose(x, z, 1.2)) {
+              const bx = this.addBush(b, i, x, z, rng, rand(rng, 0.25, 0.45), CANOPY_COLORS.desertShrub);
+              placed.push([bx, z, 0.5]);
+            } else if (r < 0.043 && d > 8 && !tooClose(x, z, 4)) {
+              this.addPalm(b, i, x, z, rng);
+              placed.push([x, z, 2]);
+            }
+            break;
+          }
+          case 'blackdesert': {
+            const r = rng();
+            if (r < 0.01 && d > 16 && !tooClose(x, z, 6)) {
+              this.addBasaltCone(b, i, x, z, rng);
+              placed.push([x, z, 7]);
+            } else if (r < 0.05 && d > 2.4 && !tooClose(x, z, 1)) {
+              this.addRock(b, i, x, z, rng, 0.6, BASALT);
+              placed.push([x, z, 0.6]);
+            }
+            break;
+          }
+          case 'ruins': {
+            const r = rng();
+            if (r < 0.006 && d > 9 && Math.abs(x) < CFG.chunk.halfWidth - 7 && !tooClose(x, z, 7)) {
+              this.addRuin(b, i, x, z, rng);
+              placed.push([x, z, 6]);
+            } else if (r < 0.016 && d > 4 && !tooClose(x, z, 2)) {
+              this.addColumn(b, i, x, z, rng);
+              placed.push([x, z, 1]);
+            } else if (r < 0.04 && d > 2.6 && !tooClose(x, z, 1.5)) {
+              this.addBlock(b, i, x, z, rng);
+              placed.push([x, z, 1]);
+            }
+            break;
+          }
+          case 'oasis': {
+            const r = rng();
+            if (r < 0.07 && d > 3.5 && d < 30 && !tooClose(x, z, 2.5)) {
+              this.addPalm(b, i, x, z, rng);
+              placed.push([x, z, 1.5]);
+            } else if (r < 0.12 && d > 2.4 && !tooClose(x, z, 1.2)) {
+              const bx = this.addBush(b, i, x, z, rng, rand(rng, 0.4, 0.8), CANOPY_COLORS.oleander);
+              placed.push([bx, z, 0.6]);
+            }
+            break;
+          }
           case 'farmstead': {
             if (d > 5 && rng() < 0.02 && !tooClose(x, z, 4)) {
               if (rng() < 0.6) this.addFruitTree(b, i, x, z, rng);
@@ -887,5 +1085,6 @@ interface Batches {
   farBlobLod: Batch;
   rock: Batch;
   roof: Batch;
+  pyramid: Batch;
 }
 

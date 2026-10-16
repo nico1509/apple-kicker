@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { CamelFactory, type Camel } from '../entities/camel';
 import { lerp, smoothstep } from '../utils/math';
 import { mulberry32, rand, subSeed, type Rng } from '../utils/noise';
 import { ColliderStore, SURFACES } from './colliders';
@@ -8,9 +9,12 @@ import { Terrain } from './terrain';
 export type ObstacleKind =
   | 'root' | 'branch' | 'log' | 'stone' | 'puddle'
   // Greece
-  | 'wall' | 'rock' | 'scree' | 'sand';
+  | 'wall' | 'rock' | 'scree' | 'sand'
+  // Desert
+  | 'camel' | 'blocks' | 'column' | 'basalt' | 'drift';
 
 const WALL_COLORS = [0xbdb4a2, 0xa99f8c, 0xcfc6b2, 0x9a907e, 0xb5a088].map((h) => new THREE.Color(h));
+const SANDSTONE_COLORS = [0xd8b47a, 0xcda66a, 0xe0c08a, 0xc89c62].map((h) => new THREE.Color(h));
 
 /**
  * Obstacles lie across the track and get denser and bigger with distance.
@@ -35,6 +39,13 @@ export class Obstacles {
   private readonly wallMat = new THREE.MeshLambertMaterial({ color: 0xffffff, flatShading: true });
   private readonly sandMat = new THREE.MeshLambertMaterial({ color: 0xdcc898 });
   private readonly wallStoneGeo = new THREE.BoxGeometry(1, 1, 1);
+  // Desert.
+  private readonly sandstoneMat = new THREE.MeshLambertMaterial({ color: 0xd6b078, flatShading: true });
+  private readonly basaltMat = new THREE.MeshLambertMaterial({ color: 0x433830, flatShading: true });
+  private readonly driftMat = new THREE.MeshLambertMaterial({ color: 0xe6c690 });
+  private readonly camelFactory = new CamelFactory();
+  /** Camels per chunk; the game animates them. */
+  readonly camels = new Map<number, Camel[]>();
   private readonly stoneGeo = new THREE.IcosahedronGeometry(1, 0);
   private readonly stubGeo = new THREE.CylinderGeometry(0.5, 1, 1, 5).translate(0, 0.5, 0);
 
@@ -44,7 +55,9 @@ export class Obstacles {
   ) {}
 
   dispose(): void {
-    for (const m of [this.rootMat, this.branchMat, this.logMat, this.logEndMat, this.stoneMat, this.puddleMat, this.limeMat, this.wallMat, this.sandMat]) m.dispose();
+    for (const m of [this.rootMat, this.branchMat, this.logMat, this.logEndMat, this.stoneMat, this.puddleMat, this.limeMat, this.wallMat, this.sandMat, this.sandstoneMat, this.basaltMat, this.driftMat]) m.dispose();
+    this.camelFactory.dispose();
+    this.camels.clear();
     this.stoneGeo.dispose();
     this.wallStoneGeo.dispose();
     this.stubGeo.dispose();
@@ -57,7 +70,14 @@ export class Obstacles {
   }
 
   private pickKind(p: number, rng: Rng): ObstacleKind {
-    const weights: Array<[ObstacleKind, number]> = landscapeAt(p) === 'greece' ? [
+    const land = landscapeAt(p);
+    const weights: Array<[ObstacleKind, number]> = land === 'desert' ? [
+      ['blocks', 0.9],
+      ['column', 0.9],
+      ['basalt', 0.9],
+      ['drift', 0.8],
+      ['camel', 0.5],
+    ] : land === 'greece' ? [
       ['scree', 1.0],
       ['wall', 1.1],
       ['rock', 0.6],
@@ -90,6 +110,7 @@ export class Obstacles {
     const n = Math.floor(expected + rng());
     if (n === 0) return group;
     const slot = (p1 - p0) / n;
+    let camelPlaced = false;
     for (let k = 0; k < n; k++) {
       const p = p0 + slot * (k + 0.15 + rng() * 0.7);
       // Keep obstacles off very steep bits of track.
@@ -99,6 +120,10 @@ export class Obstacles {
       // log and cannot be chipped over from contact): use a root there.
       if (kind === 'log' && this.terrain.pathSlope(p) < -0.08) kind = 'root';
       if (kind === 'wall' && this.terrain.pathSlope(p) < -0.08) kind = 'scree';
+      if ((kind === 'blocks' || kind === 'column') && this.terrain.pathSlope(p) < -0.08) kind = 'basalt';
+      // At most one camel per chunk.
+      if (kind === 'camel' && camelPlaced) kind = 'drift';
+      if (kind === 'camel') camelPlaced = true;
       switch (kind) {
         case 'root': this.addRoot(group, i, p, rng); break;
         case 'branch': this.addBranch(group, i, p, rng); break;
@@ -109,6 +134,11 @@ export class Obstacles {
         case 'rock': this.addRock(group, i, p, rng); break;
         case 'scree': this.addScree(group, i, p, rng); break;
         case 'sand': this.addPuddle(group, i, p, rng, this.sandMat, 4); break;
+        case 'camel': this.addCamel(group, i, p, rng); break;
+        case 'blocks': this.addBlocks(group, i, p, rng); break;
+        case 'column': this.addFallenColumn(group, i, p, rng); break;
+        case 'basalt': this.addScree(group, i, p, rng, this.basaltMat); break;
+        case 'drift': this.addPuddle(group, i, p, rng, this.driftMat, 5); break;
       }
     }
     return group;
@@ -404,7 +434,7 @@ export class Obstacles {
   }
 
   /** Loose scree: a scatter of small stones that knock the apple off line. */
-  private addScree(group: THREE.Group, chunk: number, p: number, rng: Rng): void {
+  private addScree(group: THREE.Group, chunk: number, p: number, rng: Rng, material?: THREE.Material): void {
     const cx = this.terrain.pathCenterX(p);
     const count = 5 + Math.floor(rng() * 5);
     for (let k = 0; k < count; k++) {
@@ -412,7 +442,7 @@ export class Obstacles {
       const x = cx + rand(rng, -1.4, 1.4);
       const z = -p + rand(rng, -0.8, 0.8);
       const y = this.terrain.groundHeight(x, z) + r * 0.4;
-      const mesh = new THREE.Mesh(this.stoneGeo, rng() < 0.6 ? this.limeMat : this.stoneMat);
+      const mesh = new THREE.Mesh(this.stoneGeo, material ?? (rng() < 0.6 ? this.limeMat : this.stoneMat));
       mesh.position.set(x, y, z);
       mesh.scale.set(r * rand(rng, 0.9, 1.4), r * rand(rng, 0.7, 1.0), r * rand(rng, 0.9, 1.4));
       mesh.rotation.set(rng() * 3, rng() * 3, rng() * 3);
@@ -420,6 +450,120 @@ export class Obstacles {
       group.add(mesh);
       this.colliders.add(chunk, { kind: 'sphere', x, y, z, r, surface: SURFACES.stone, blocksPlayer: false });
     }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Desert
+
+  /** A camel lying on one half of the track. It turns its head and spits (see CamelSpit). */
+  private addCamel(group: THREE.Group, chunk: number, p: number, rng: Rng): void {
+    const cx = this.terrain.pathCenterX(p);
+    const x = cx + (rng() < 0.5 ? -1 : 1) * rand(rng, 0.75, 1.0);
+    const z = -p;
+    // Lying along the lane, facing the player who comes from behind (+Z).
+    const yaw = this.terrain.pathHeading(p) + rand(rng, -0.45, 0.45);
+    const camel = this.camelFactory.build(x, this.terrain.groundHeight(x, z) - 0.05, z, yaw, rng);
+    group.add(camel.group);
+    let list = this.camels.get(chunk);
+    if (!list) {
+      list = [];
+      this.camels.set(chunk, list);
+    }
+    list.push(camel);
+    // Body collider along the camel's length.
+    const fx = Math.sin(yaw);
+    const fz = Math.cos(yaw);
+    const ax = x - fx * 0.65;
+    const az = z - fz * 0.65;
+    const bx = x + fx * 0.55;
+    const bz = z + fz * 0.55;
+    this.colliders.add(chunk, {
+      kind: 'capsule',
+      ax, ay: this.terrain.groundHeight(ax, az) + 0.42, az,
+      bx, by: this.terrain.groundHeight(bx, bz) + 0.42, bz,
+      r: 0.45, surface: SURFACES.fur, blocksPlayer: true,
+    });
+  }
+
+  /** Two or three cut sandstone blocks in a row across the track: chip the apple over them. */
+  private addBlocks(group: THREE.Group, chunk: number, p: number, rng: Rng): void {
+    const cx = this.terrain.pathCenterX(p);
+    const angle = this.terrain.pathHeading(p) + rand(rng, -0.3, 0.3);
+    const dirX = Math.cos(angle);
+    const dirZ = -Math.sin(angle);
+    const count = 2 + Math.floor(rng() * 2);
+    const bw = rand(rng, 0.85, 1.05);
+    const h = rand(rng, 0.3, 0.42) + 0.1 * smoothstep(0, 600, Obstacles.local(p));
+    const d0 = rand(rng, -0.4, 0.4) - ((count - 1) * bw) / 2;
+    const mesh = new THREE.InstancedMesh(this.wallStoneGeo, this.wallMat, count);
+    const m = new THREE.Matrix4();
+    const q = new THREE.Quaternion();
+    const e = new THREE.Euler();
+    const pts: Array<[number, number, number]> = [];
+    for (let k = 0; k < count; k++) {
+      const t = d0 + k * bw;
+      const x = cx + dirX * t;
+      const z = -p + dirZ * t;
+      const y = this.terrain.groundHeight(x, z) + h / 2 - 0.04;
+      pts.push([x, y, z]);
+      e.set(rand(rng, -0.05, 0.05), angle + rand(rng, -0.12, 0.12), rand(rng, -0.05, 0.05), 'YXZ');
+      q.setFromEuler(e);
+      m.compose(new THREE.Vector3(x, y, z), q, new THREE.Vector3(bw * 0.96, h * rand(rng, 0.9, 1.1), rand(rng, 0.5, 0.65)));
+      mesh.setMatrixAt(k, m);
+      mesh.setColorAt(k, SANDSTONE_COLORS[Math.floor(rng() * SANDSTONE_COLORS.length)]);
+    }
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    mesh.computeBoundingSphere();
+    group.add(mesh);
+    const [a, b] = [pts[0], pts[pts.length - 1]];
+    const r = h / 2;
+    this.colliders.add(chunk, {
+      kind: 'capsule',
+      ax: a[0] - dirX * bw * 0.4, ay: a[1], az: a[2] - dirZ * bw * 0.4,
+      bx: b[0] + dirX * bw * 0.4, by: b[1], bz: b[2] + dirZ * bw * 0.4,
+      r, surface: SURFACES.stone, blocksPlayer: false,
+    });
+  }
+
+  /** A fallen sandstone column across the track, broken into drums. */
+  private addFallenColumn(group: THREE.Group, chunk: number, p: number, rng: Rng): void {
+    const radius = rand(rng, 0.18, 0.24) + 0.06 * smoothstep(0, 600, Obstacles.local(p));
+    const length = rand(rng, 3, 4.2);
+    const cx = this.terrain.pathCenterX(p);
+    const angle = this.terrain.pathHeading(p) + rand(rng, -0.35, 0.35);
+    const d0 = rand(rng, -0.6, 0.6);
+    const dirX = Math.cos(angle);
+    const dirZ = -Math.sin(angle);
+    const ax = cx + d0 - (dirX * length) / 2;
+    const az = -p - (dirZ * length) / 2;
+    const bx = cx + d0 + (dirX * length) / 2;
+    const bz = -p + (dirZ * length) / 2;
+    const ay = this.terrain.groundHeight(ax, az) + radius * 0.85;
+    const by = this.terrain.groundHeight(bx, bz) + radius * 0.85;
+    const drums = 3 + Math.floor(rng() * 2);
+    const dir = new THREE.Vector3(bx - ax, by - ay, bz - az);
+    const len3 = dir.length();
+    dir.normalize();
+    const up = new THREE.Vector3(0, 1, 0);
+    for (let k = 0; k < drums; k++) {
+      const t = (k + 0.5) / drums;
+      const geo = new THREE.CylinderGeometry(radius, radius, (len3 / drums) * 0.97, 8, 1);
+      const mesh = new THREE.Mesh(geo, this.sandstoneMat);
+      mesh.userData.ownGeometry = true;
+      mesh.position.set(ax + (bx - ax) * t, ay + (by - ay) * t, az + (bz - az) * t);
+      mesh.quaternion.setFromUnitVectors(up, dir);
+      mesh.rotateY(rand(rng, 0, 1));
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      group.add(mesh);
+    }
+    this.colliders.add(chunk, { kind: 'capsule', ax, ay, az, bx, by, bz, r: radius, surface: SURFACES.stone, blocksPlayer: false });
+  }
+
+  /** Forget the camels of a chunk that is being removed. */
+  removeChunk(i: number): void {
+    this.camels.delete(i);
   }
 
   static disposeGroup(group: THREE.Group): void {

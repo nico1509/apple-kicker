@@ -6,10 +6,10 @@ import { smoothstep } from '../utils/math';
  * Landscapes change every LANDSCAPE_LENGTH metres along the path and loop:
  * after the last one the first one (the autumn forest) comes back.
  */
-export type Landscape = 'forest' | 'greece';
+export type Landscape = 'forest' | 'greece' | 'desert';
 
 export const LANDSCAPE_LENGTH = 1000;
-export const LANDSCAPES: readonly Landscape[] = ['forest', 'greece'];
+export const LANDSCAPES: readonly Landscape[] = ['forest', 'greece', 'desert'];
 /** Half width (m) of the cross-fade of colours, light and backdrop at a landscape border. */
 const BLEND = 40;
 
@@ -67,6 +67,7 @@ export interface Atmosphere {
   fogNear: number;
   fogFar: number;
   cirrus: number; // 0..1 amount of high cirrus streaks in the sky
+  clouds: number; // 0..1 share of the cumulus clouds that are shown
 }
 
 export const ATMOSPHERES: Record<Landscape, Atmosphere> = {
@@ -81,6 +82,7 @@ export const ATMOSPHERES: Record<Landscape, Atmosphere> = {
     fogNear: CFG.render.fogNear,
     fogFar: CFG.render.fogFar,
     cirrus: 1,
+    clouds: 1,
   },
   // Late summer in rural Greece: deep blue sky, dry clear air, warm light.
   greece: {
@@ -93,6 +95,20 @@ export const ATMOSPHERES: Record<Landscape, Atmosphere> = {
     fogNear: 90,
     fogFar: 290,
     cirrus: 0.3,
+    clouds: 0.7,
+  },
+  // The Egyptian desert: hot, dusty air and a pale horizon.
+  desert: {
+    horizon: new THREE.Color(0xe4dccb),
+    top: new THREE.Color(0x4a8bd4),
+    hemiSky: new THREE.Color(0xe2e6f0),
+    hemiGround: new THREE.Color(0xb08a50),
+    sun: new THREE.Color(0xfff0c8),
+    sunIntensity: 3.3,
+    fogNear: 80,
+    fogFar: 310,
+    cirrus: 0.15,
+    clouds: 0.25,
   },
 };
 
@@ -111,6 +127,7 @@ export function atmosphereAt(p: number, out: Atmosphere): Atmosphere {
   out.fogNear = A.fogNear + (B.fogNear - A.fogNear) * t;
   out.fogFar = A.fogFar + (B.fogFar - A.fogFar) * t;
   out.cirrus = A.cirrus + (B.cirrus - A.cirrus) * t;
+  out.clouds = A.clouds + (B.clouds - A.clouds) * t;
   return out;
 }
 
@@ -126,5 +143,6 @@ export function createAtmosphere(): Atmosphere {
     fogNear: f.fogNear,
     fogFar: f.fogFar,
     cirrus: f.cirrus,
+    clouds: f.clouds,
   };
 }
