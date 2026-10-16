@@ -47,7 +47,9 @@ dem Apfel außerdem einen leichten Drall nach innen (linker Fuß: nach rechts, r
 
 * Gezählt werden die Meter, die der **Apfel** entlang des Weges zurücklegt.
 * Hinter dir zieht eine Schlechtwetterfront mit Regen und Gewitter heran. Sie wird
-  mit der Zeit schneller. Holt sie dich ein, ist der Lauf vorbei.
+  mit der Zeit schneller. Holt sie **dich oder deinen Apfel** ein, ist der Lauf vorbei.
+* Ist der Apfel mehr als 50 m von dir entfernt, wird er immer markiert, auch wenn
+  er im Bild ist.
 * Mit der Strecke tauchen immer mehr Hindernisse auf: Wurzeln, Äste, Steine,
   Pfützen, umgestürzte Stämme und Hügel. Kick fester, lupf drüber oder such dir
   einen Weg drum herum.
