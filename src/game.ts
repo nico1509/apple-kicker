@@ -606,7 +606,7 @@ export class Game {
     }
   }
 
-  /** The thirst bar drains fast; bottles on the path refill half of it. Empty costs a life. */
+  /** The thirst bar drains fast; a bottle on the path fills it up again. Empty costs a life. */
   private updateThirst(dt: number): void {
     if (this.state !== 'playing') return;
     const got = this.world.bottles.collect(this.player.pos);

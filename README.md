@@ -30,7 +30,7 @@ Auf schwachen Rechnern `?quality=low` oder `?quality=medium` an die Adresse hän
 | Eingabe | Aktion |
 | --- | --- |
 | `W` `A` `S` `D` | laufen |
-| `Shift` | sprinten (begrenzte Ausdauer; ganz leer gesprintet bist du eine Sekunde aus der Puste) |
+| `Shift` | sprinten (begrenzte Ausdauer; ganz leer gesprintet bist du eine Sekunde aus der Puste, danach ist sie wieder voll) |
 | Maus | umsehen |
 | **Linke Maustaste** halten, ziehen, loslassen | Kick mit dem **linken** Fuß |
 | **Rechte Maustaste** halten, ziehen, loslassen | Kick mit dem **rechten** Fuß |
@@ -52,7 +52,7 @@ dem Apfel außerdem einen leichten Drall nach innen (linker Fuß: nach rechts, r
 * Hinter dir zieht eine Schlechtwetterfront mit Regen und Gewitter heran. Sie wird
   mit der Zeit schneller. Holt sie **dich oder deinen Apfel** ein, kostet das ein Leben.
 * Kicken macht durstig: Die **Durst-Anzeige** leert sich schnell. Auf dem Weg schweben
-  Apfelschorle-Flaschen, jede füllt die Anzeige um die Hälfte auf. Ist sie leer, bist du
+  Apfelschorle-Flaschen, jede füllt die Anzeige wieder ganz auf. Ist sie leer, bist du
   verdurstet – das kostet ebenfalls ein Leben.
 * Im Startmenü wählst du die Schwierigkeit:
   * **Schwer**: ein Leben – eingeholt ist der Lauf vorbei.

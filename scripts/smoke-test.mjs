@@ -420,7 +420,7 @@ try {
   await page.evaluate((b) => window.__appleKicker.game.player.reset(b.x, b.z, 0), b0);
   await simulate(0.05);
   const t1 = await state();
-  check(t1.bottles === drunk + 1 && t1.thirst > 0.78 && t1.thirst <= 0.8, `a bottle refills half of the bar (${t1.bottles - drunk}, ${t1.thirst.toFixed(3)})`);
+  check(t1.bottles === drunk + 1 && t1.thirst > 0.98, `a bottle fills the bar completely (${t1.bottles - drunk}, ${t1.thirst.toFixed(3)})`);
   await simulate(0.5);
   const t1b = await state();
   check(t1b.bottles === drunk + 1, 'a bottle can only be drunk once');
@@ -448,7 +448,8 @@ try {
   await simulate(0.5);
   await simulate(0.6, ['KeyW']);
   const x2 = await state();
-  check(x2.exhausted === 0 && x2.playerZ < x1.playerZ - 0.6, `after a second the player walks again (${(x1.playerZ - x2.playerZ).toFixed(2)} m)`);
+  check(x1.stamina > 0.55 && x1.stamina < 0.85, `catching the breath refills the stamina (${x1.stamina.toFixed(2)})`);
+  check(x2.exhausted === 0 && x2.stamina > 0.95 && x2.playerZ < x1.playerZ - 0.6, `after a second the player walks again (${(x1.playerZ - x2.playerZ).toFixed(2)} m)`);
 
   // Frame rate estimate (software rendering, so only a rough sanity figure).
   const fps = await page.evaluate(

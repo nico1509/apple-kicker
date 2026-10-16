@@ -152,8 +152,11 @@ export class Player {
       this.intentX = 0;
       this.intentZ = 0;
     } else {
-      this.exhausted = Math.max(0, this.exhausted - dt);
-      if (wantSprint) {
+      if (this.exhausted > 0) {
+        // Catching the breath fills the stamina bar completely within that second.
+        this.exhausted = Math.max(0, this.exhausted - dt);
+        this.stamina = 1 - this.exhausted / CFG.player.exhaustedSeconds;
+      } else if (wantSprint) {
         this.stamina = Math.max(0, this.stamina - dt / CFG.player.staminaMax);
         if (this.stamina <= 0) {
           this.exhausted = CFG.player.exhaustedSeconds;

@@ -25,7 +25,7 @@ export const CFG = {
     accel: 22,
     staminaMax: 3, // seconds of sprint
     staminaRegen: 0.3, // seconds of stamina regained per second (a tenth of the bar per second)
-    exhaustedSeconds: 1, // sprinting the stamina empty stops the player for this long
+    exhaustedSeconds: 1, // sprinting the stamina empty stops the player for this long, then it is full again
     pitchMin: -1.5,
     pitchMax: 1.1,
     lookSensitivity: 0.0022,
@@ -53,7 +53,7 @@ export const CFG = {
   },
   thirst: {
     drainSeconds: 17.5, // a full thirst bar empties in this time
-    refill: 0.5, // one bottle refills half the bar
+    refill: 1, // one bottle fills the bar completely
     warnBelow: 0.25,
     firstBottle: 20, // no bottles on the first metres
     bottleChance: 0.9, // chance of a bottle per chunk (32 m)
