@@ -2,9 +2,9 @@ import * as THREE from 'three';
 import { CFG } from '../config';
 import { smoothstep } from '../utils/math';
 import { fbm2, hash3, mulberry32, rand, subSeed, type Rng } from '../utils/noise';
-import { ColliderStore, SURFACES } from './colliders';
+import { ColliderStore, SURFACES, type Collider } from './colliders';
 import { landscapeAt, landscapeWeight } from './landscape';
-import { Terrain, type BiomeType, type Side } from './terrain';
+import { GORGE, Terrain, type BiomeType, type Side } from './terrain';
 
 /** Collects instance transforms and colours, then bakes them into an InstancedMesh. */
 class Batch {
@@ -144,6 +144,18 @@ export class Decor {
 
   // ---------------------------------------------------------------------------
 
+  /** True inside the walled-off area around a gorge (plus `margin` metres), where nothing grows. */
+  private inGorge(x: number, z: number, margin = 0): boolean {
+    const g = this.terrain.gorgeNear(-z, GORGE.rim + margin);
+    return g !== null && Math.abs(x - g.x) < GORGE.reach + margin;
+  }
+
+  private addCollider(chunk: number, c: Collider): void {
+    const x = c.kind === 'capsule' || c.kind === 'wall' ? (c.ax + c.bx) / 2 : c.x;
+    const z = c.kind === 'capsule' || c.kind === 'wall' ? (c.az + c.bz) / 2 : c.z;
+    if (!this.inGorge(x, z)) this.colliders.add(chunk, c);
+  }
+
   private place(
     batch: Batch,
     x: number, y: number, z: number,
@@ -152,6 +164,7 @@ export class Decor {
     color: THREE.Color,
     tiltX = 0, tiltZ = 0,
   ): void {
+    if (this.inGorge(x, z)) return;
     this.pos.set(x, y, z);
     this.scl.set(sx, sy, sz);
     this.euler.set(tiltX, yaw, tiltZ, 'YXZ');
@@ -194,7 +207,7 @@ export class Decor {
       const sy = s * rand(rng, 0.75, 1.0);
       this.place(b.canopy, x + ox, y + h + sy * 0.65 + oy, z + oz, s, sy, s * rand(rng, 0.85, 1.1), rng() * 6.28, this.pickColor(palette, rng));
     }
-    this.colliders.add(chunk, { kind: 'cylinder', x, z, r: tr + 0.08, yTop: y + h, surface: SURFACES.trunk, blocksPlayer: true });
+    this.addCollider(chunk, { kind: 'cylinder', x, z, r: tr + 0.08, yTop: y + h, surface: SURFACES.trunk, blocksPlayer: true });
   }
 
   private addFruitTree(b: Batches, chunk: number, x: number, z: number, rng: Rng): void {
@@ -209,7 +222,7 @@ export class Decor {
       const s2 = s * rand(rng, 0.5, 0.7);
       this.place(b.canopy, x + rand(rng, -s * 0.5, s * 0.5), y + h + s * 0.9, z + rand(rng, -s * 0.5, s * 0.5), s2, s2, s2, rng() * 6.28, this.pickColor(palette, rng));
     }
-    this.colliders.add(chunk, { kind: 'cylinder', x, z, r: tr + 0.08, yTop: y + h, surface: SURFACES.trunk, blocksPlayer: true });
+    this.addCollider(chunk, { kind: 'cylinder', x, z, r: tr + 0.08, yTop: y + h, surface: SURFACES.trunk, blocksPlayer: true });
   }
 
   private addFir(b: Batches, chunk: number, x: number, z: number, rng: Rng): void {
@@ -225,7 +238,7 @@ export class Decor {
       const th = h * 0.42;
       this.place(b.cone, x, y + h * 0.22 + t * h * 0.55, z, r, th, r, rng() * 6.28, this.pickColor(CANOPY_COLORS.fir, rng));
     }
-    this.colliders.add(chunk, { kind: 'cylinder', x, z, r: tr + 0.08, yTop: y + h, surface: SURFACES.trunk, blocksPlayer: true });
+    this.addCollider(chunk, { kind: 'cylinder', x, z, r: tr + 0.08, yTop: y + h, surface: SURFACES.trunk, blocksPlayer: true });
   }
 
   /**
@@ -256,7 +269,7 @@ export class Decor {
     for (const [sx, sy, sz, ox, oz] of sizes) {
       this.place(b.bush, x + ox, y + sy * 0.55, z + oz, sx, sy, sz, rng() * 6.28, this.pickColor(palette, rng, 0.12));
     }
-    this.colliders.add(chunk, { kind: 'sphere', x, y: y + maxR * 0.45, z, r: colliderR, surface: SURFACES.bush, blocksPlayer: false });
+    this.addCollider(chunk, { kind: 'sphere', x, y: y + maxR * 0.45, z, r: colliderR, surface: SURFACES.bush, blocksPlayer: false });
     return x;
   }
 
@@ -298,7 +311,7 @@ export class Decor {
       const z = -p;
       const y = this.terrain.groundHeight(x, z);
       this.place(b.box, x, y - 0.1, z, 0.1, 1.1, 0.1, 0, POST_COLOR);
-      this.colliders.add(chunk, { kind: 'cylinder', x, z, r: 0.1, yTop: y + 1, surface: SURFACES.post, blocksPlayer: true });
+      this.addCollider(chunk, { kind: 'cylinder', x, z, r: 0.1, yTop: y + 1, surface: SURFACES.post, blocksPlayer: true });
       if (!Number.isNaN(prevX)) {
         for (const h of [0.45, 0.85]) {
           const mx = (x + prevX) / 2;
@@ -311,7 +324,7 @@ export class Decor {
           this.place(b.box, mx, my - 0.04, mz, 0.06, 0.08, len, yaw, RAIL_COLOR, -tilt, 0);
           // Rails bounce the apple but the player can climb through them, so the
           // apple can never end up out of reach behind a fence.
-          this.colliders.add(chunk, { kind: 'capsule', ax: prevX, ay: prevY + h, az: prevZ, bx: x, by: y + h, bz: z, r: 0.05, surface: SURFACES.post, blocksPlayer: false });
+          this.addCollider(chunk, { kind: 'capsule', ax: prevX, ay: prevY + h, az: prevZ, bx: x, by: y + h, bz: z, r: 0.05, surface: SURFACES.post, blocksPlayer: false });
         }
       }
       prevX = x;
@@ -337,7 +350,7 @@ export class Decor {
         const x = cx + side * d;
         const y = this.terrain.groundHeight(x, z);
         this.place(b.box, x, y - 0.1, z, 0.08, 1.9, 0.08, 0, POST_COLOR);
-        this.colliders.add(chunk, { kind: 'cylinder', x, z, r: 0.08, yTop: y + 1.8, surface: SURFACES.post, blocksPlayer: true });
+        this.addCollider(chunk, { kind: 'cylinder', x, z, r: 0.08, yTop: y + 1.8, surface: SURFACES.post, blocksPlayer: true });
         if (!Number.isNaN(prevX)) {
           // Wire between the posts, following the slope.
           const mx = (x + prevX) / 2;
@@ -357,7 +370,7 @@ export class Decor {
             const sx = rand(rng, 0.45, 0.6);
             const sy = rand(rng, 0.55, 0.75);
             this.place(b.bush, bx, by + 0.55 + sy * 0.5, z + rand(rng, -0.08, 0.08), sx, sy, rand(rng, 0.28, 0.4), rng() * 0.4, this.pickColor(CANOPY_COLORS.vine, rng, 0.12));
-            this.colliders.add(chunk, { kind: 'sphere', x: bx, y: by + 0.8, z, r: 0.42, surface: SURFACES.bush, blocksPlayer: false });
+            this.addCollider(chunk, { kind: 'sphere', x: bx, y: by + 0.8, z, r: 0.42, surface: SURFACES.bush, blocksPlayer: false });
           }
         }
       }
@@ -500,7 +513,7 @@ export class Decor {
       const s = rand(rng, 0.6, 1.0) * (k === 0 ? 1.15 : 1);
       this.place(b.canopy, x + Math.cos(a) * o, y + h + 0.5 + rand(rng, -0.2, 0.35), z + Math.sin(a) * o, s, s * rand(rng, 0.5, 0.7), s, rng() * 6.28, this.pickColor(CANOPY_COLORS.olive, rng, 0.06));
     }
-    this.colliders.add(chunk, { kind: 'cylinder', x, z, r: tr + 0.08, yTop: y + h, surface: SURFACES.trunk, blocksPlayer: true });
+    this.addCollider(chunk, { kind: 'cylinder', x, z, r: tr + 0.08, yTop: y + h, surface: SURFACES.trunk, blocksPlayer: true });
   }
 
   /** A slim, dark Mediterranean cypress. */
@@ -510,7 +523,7 @@ export class Decor {
     const r = h * rand(rng, 0.09, 0.12);
     this.place(b.trunk, x, y, z, 0.15, 1.0, 0.15, 0, this.pickColor(TRUNK_COLORS, rng));
     this.place(b.canopy, x, y + 0.4 + h * 0.5, z, r, h * 0.5, r, rng() * 6.28, this.pickColor(CANOPY_COLORS.cypress, rng));
-    this.colliders.add(chunk, { kind: 'cylinder', x, z, r: 0.3, yTop: y + h, surface: SURFACES.bush, blocksPlayer: true });
+    this.addCollider(chunk, { kind: 'cylinder', x, z, r: 0.3, yTop: y + h, surface: SURFACES.bush, blocksPlayer: true });
   }
 
   /** Oleander: a green bush covered in pink blossoms. */
@@ -534,7 +547,7 @@ export class Decor {
     x = this.clearOfLane(x, z, r * 1.3);
     const y = this.terrain.groundHeight(x, z) + r * 0.2;
     this.place(b.rock, x, y, z, r * rand(rng, 1.0, 1.4), r * rand(rng, 0.6, 0.9), r * rand(rng, 1.0, 1.3), rng() * 6.28, this.pickColor(colors, rng, 0.05), rand(rng, -0.3, 0.3), rand(rng, -0.3, 0.3));
-    this.colliders.add(chunk, { kind: 'sphere', x, y, z, r: r * 0.95, surface: SURFACES.stone, blocksPlayer: r > 0.35 });
+    this.addCollider(chunk, { kind: 'sphere', x, y, z, r: r * 0.95, surface: SURFACES.stone, blocksPlayer: r > 0.35 });
     const extra = Math.floor(rng() * 3);
     for (let k = 0; k < extra; k++) {
       const a = rng() * Math.PI * 2;
@@ -543,7 +556,7 @@ export class Decor {
       const sz = z + Math.sin(a) * r * 1.3;
       const sy = this.terrain.groundHeight(sx, sz) + rs * 0.2;
       this.place(b.rock, sx, sy, sz, rs * 1.2, rs * 0.8, rs, rng() * 6.28, this.pickColor(colors, rng, 0.05));
-      this.colliders.add(chunk, { kind: 'sphere', x: sx, y: sy, z: sz, r: rs * 0.95, surface: SURFACES.stone, blocksPlayer: false });
+      this.addCollider(chunk, { kind: 'sphere', x: sx, y: sy, z: sz, r: rs * 0.95, surface: SURFACES.stone, blocksPlayer: false });
     }
   }
 
@@ -586,7 +599,7 @@ export class Decor {
         const bx = this.terrain.pathCenterX(p + step) + dWall;
         const ay = this.terrain.groundHeight(ax, -p) + 0.4;
         const by = this.terrain.groundHeight(bx, -(p + step)) + 0.4;
-        this.colliders.add(chunk, { kind: 'capsule', ax, ay, az: -p, bx, by, bz: -(p + step), r: 0.32, surface: SURFACES.stone, blocksPlayer: false });
+        this.addCollider(chunk, { kind: 'capsule', ax, ay, az: -p, bx, by, bz: -(p + step), r: 0.32, surface: SURFACES.stone, blocksPlayer: false });
       }
     }
   }
@@ -604,7 +617,7 @@ export class Decor {
         if (rng() < 0.1) continue;
         const x = cx + side * (d + rand(rng, -0.8, 0.8));
         const z = -p + rand(rng, -0.8, 0.8);
-        if (Math.abs(x) > CFG.chunk.halfWidth - 1.5) continue;
+        if (Math.abs(x) > CFG.chunk.halfWidth - 1.5 || this.inGorge(x, z, 2.5)) continue;
         this.addOliveTree(b, chunk, x, z, rng);
       }
     }
@@ -648,7 +661,7 @@ export class Decor {
     const n = Math.ceil(len / dep) + 1;
     for (let k = 0; k < n; k++) {
       const [cx, cz] = world(0, -len / 2 + dep / 2 + ((len - dep) * k) / Math.max(1, n - 1));
-      this.colliders.add(chunk, { kind: 'cylinder', x: cx, z: cz, r: dep / 2, yTop: y0 + wallH, surface: SURFACES.stone, blocksPlayer: true });
+      this.addCollider(chunk, { kind: 'cylinder', x: cx, z: cz, r: dep / 2, yTop: y0 + wallH, surface: SURFACES.stone, blocksPlayer: true });
     }
   }
 
@@ -661,7 +674,7 @@ export class Decor {
       const bz = z - Math.sin(yaw) * k * 0.55;
       const y = this.terrain.groundHeight(bx, bz) - 0.03;
       this.place(b.box, bx, y, bz, 0.5, 0.42, 1.0, yaw + rand(rng, -0.1, 0.1), this.pickColor(HAY, rng, 0.05));
-      this.colliders.add(chunk, { kind: 'cylinder', x: bx, z: bz, r: 0.45, yTop: y + 0.42, surface: SURFACES.bush, blocksPlayer: true });
+      this.addCollider(chunk, { kind: 'cylinder', x: bx, z: bz, r: 0.45, yTop: y + 0.42, surface: SURFACES.bush, blocksPlayer: true });
     }
   }
 
@@ -737,7 +750,7 @@ export class Decor {
       const a = rng() * Math.PI * 2;
       this.place(b.bush, px + Math.cos(a) * 0.3, py - 0.35, pz + Math.sin(a) * 0.3, 0.16, 0.24, 0.16, 0, this.pickColor(DATES, rng, 0.05));
     }
-    this.colliders.add(chunk, { kind: 'cylinder', x, z, r: 0.3, yTop: y0 + h, surface: SURFACES.trunk, blocksPlayer: true });
+    this.addCollider(chunk, { kind: 'cylinder', x, z, r: 0.3, yTop: y0 + h, surface: SURFACES.trunk, blocksPlayer: true });
   }
 
   /** Crumbling mud-brick walls of an old settlement, with a broken top edge. */
@@ -757,7 +770,7 @@ export class Decor {
       const y = this.terrain.groundHeight(wx, wz) - 0.2;
       const hh = baseH * rand(rng, 0.45, 1.0);
       this.place(b.box, wx, y, wz, thick, hh + 0.2, len / pieces + 0.02, yaw, this.pickColor(MUD_BRICK, rng, 0.04));
-      this.colliders.add(chunk, { kind: 'cylinder', x: wx, z: wz, r: 0.6, yTop: y + hh, surface: SURFACES.stone, blocksPlayer: true });
+      this.addCollider(chunk, { kind: 'cylinder', x: wx, z: wz, r: 0.6, yTop: y + hh, surface: SURFACES.stone, blocksPlayer: true });
     }
     // A return wall at one end.
     if (rng() < 0.6) {
@@ -770,7 +783,7 @@ export class Decor {
       const y = this.terrain.groundHeight(mx, mz) - 0.2;
       const hh = baseH * rand(rng, 0.5, 0.9);
       this.place(b.box, mx, y, mz, rl, hh + 0.2, thick, yaw, this.pickColor(MUD_BRICK, rng, 0.04));
-      this.colliders.add(chunk, { kind: 'cylinder', x: mx, z: mz, r: rl / 2, yTop: y + hh, surface: SURFACES.stone, blocksPlayer: true });
+      this.addCollider(chunk, { kind: 'cylinder', x: mx, z: mz, r: rl / 2, yTop: y + hh, surface: SURFACES.stone, blocksPlayer: true });
     }
   }
 
@@ -782,7 +795,7 @@ export class Decor {
     const h = intact ? rand(rng, 4, 5.5) : rand(rng, 0.8, 3.2);
     this.place(b.trunk, x, y, z, r, h, r, rng() * 6.28, this.pickColor(SANDSTONE, rng, 0.04));
     if (intact) this.place(b.box, x, y + h - 0.05, z, r * 2.6, 0.4, r * 2.6, rng() * 6.28, this.pickColor(SANDSTONE, rng, 0.04));
-    this.colliders.add(chunk, { kind: 'cylinder', x, z, r: r + 0.05, yTop: y + h, surface: SURFACES.stone, blocksPlayer: true });
+    this.addCollider(chunk, { kind: 'cylinder', x, z, r: r + 0.05, yTop: y + h, surface: SURFACES.stone, blocksPlayer: true });
   }
 
   /** A fallen sandstone block, half sunk into the sand. */
@@ -791,7 +804,7 @@ export class Decor {
     x = this.clearOfLane(x, z, s * 0.8);
     const y = this.terrain.groundHeight(x, z) - s * 0.25;
     this.place(b.box, x, y, z, s * rand(rng, 1, 1.6), s * rand(rng, 0.6, 0.9), s, rng() * 6.28, this.pickColor(SANDSTONE, rng, 0.05), rand(rng, -0.15, 0.15), rand(rng, -0.15, 0.15));
-    this.colliders.add(chunk, { kind: 'cylinder', x, z, r: s * 0.6, yTop: y + s * 0.8, surface: SURFACES.stone, blocksPlayer: s > 0.6 });
+    this.addCollider(chunk, { kind: 'cylinder', x, z, r: s * 0.6, yTop: y + s * 0.8, surface: SURFACES.stone, blocksPlayer: s > 0.6 });
   }
 
   /** A dark, cone-shaped hill of the black desert. */
@@ -800,7 +813,7 @@ export class Decor {
     const h = r * rand(rng, 0.6, 0.9);
     const y = this.terrain.groundHeight(x, z) - 0.4;
     this.place(b.cone, x, y, z, r, h, r, rng() * 6.28, this.pickColor(BASALT, rng, 0.06));
-    this.colliders.add(chunk, { kind: 'cylinder', x, z, r: r * 0.7, yTop: y + h * 0.6, surface: SURFACES.stone, blocksPlayer: true });
+    this.addCollider(chunk, { kind: 'cylinder', x, z, r: r * 0.7, yTop: y + h * 0.6, surface: SURFACES.stone, blocksPlayer: true });
   }
 
   /** A group of pyramids on the horizon. */
@@ -862,7 +875,7 @@ export class Decor {
         const hrng = mulberry32(subSeed(this.terrain.seed, 1900 + k, side + 2));
         const hd = rand(hrng, 11, 17);
         const hx = this.terrain.pathCenterX(hp) + side * hd;
-        if (Math.abs(hx) > CFG.chunk.halfWidth - 6) continue;
+        if (Math.abs(hx) > CFG.chunk.halfWidth - 6 || this.inGorge(hx, -hp, 9)) continue;
         this.addHouse(b, i, hx, -hp, side, hrng);
         placed.push([hx, -hp, 5]);
         // Oleanders and a cypress by the house.
@@ -885,6 +898,7 @@ export class Decor {
         const x = cx + side * d;
         const z = -p;
         if (Math.abs(x) > CFG.chunk.halfWidth - 1.5) continue;
+        if (this.inGorge(x, z, 2.5)) continue;
         switch (biome) {
           case 'forest': {
             if (d < 3.2) {

@@ -68,6 +68,37 @@ const BIOME_WEIGHTS: Record<Landscape, Array<[BiomeType, number]>> = {
   ],
 };
 
+/**
+ * A rocky gorge across the track in the Greek landscape, spanned by a steel
+ * bridge. The track runs straight and level over the bridge.
+ */
+export interface Gorge {
+  /** Progress of the gorge's centre line; it crosses the track at right angles. */
+  p: number;
+  /** Path centre x on the bridge. */
+  x: number;
+  /** Height of the track and of the bridge deck. */
+  h: number;
+}
+
+export const GORGE = {
+  /** Half width (m along the track) of the gorge at the top. */
+  half: 5.5,
+  depth: 16,
+  /** Beyond this lateral distance from the track the gorge has closed. */
+  reach: 36,
+  /** Half width of the bridge deck: beyond it the apple falls into the gorge. */
+  deckHalf: 1.5,
+  /** Half length of the bridge deck (it rests on the ground at both ends). */
+  deckHalfLen: 6.9,
+  /** Distance of the invisible walls along the rims from the gorge centre line. */
+  rim: 6.7,
+} as const;
+/** Over this distance from a gorge the track eases into a straight, level line. */
+const GORGE_FLAT = 28;
+/** Search ranges (m into a Greek section) for the first and the second gorge. */
+const GORGE_SLOTS: ReadonlyArray<[number, number]> = [[170, 440], [560, 830]];
+
 export class Terrain {
   readonly seed: number;
   private readonly phase: number[];
@@ -75,6 +106,7 @@ export class Terrain {
   private readonly stepOffsetCache = new Map<number, number>();
   private readonly biomeCache = new Map<number, BiomeType>();
   private readonly mixScratch: BiomeMix = { a: 'meadow', b: 'meadow', t: 1 };
+  private readonly gorgeCache = new Map<number, Gorge[]>();
 
   constructor(seed: number) {
     this.seed = seed >>> 0;
@@ -86,6 +118,13 @@ export class Terrain {
   // Path centre line
 
   pathCenterX(p: number): number {
+    const x = this.rawCenterX(p);
+    const g = this.gorgeNear(p, GORGE_FLAT);
+    if (!g) return x;
+    return lerp(x, g.x, 1 - smoothstep(GORGE.deckHalfLen + 1, GORGE_FLAT, Math.abs(p - g.p)));
+  }
+
+  private rawCenterX(p: number): number {
     const s = this.seed;
     const x =
       5.5 * Math.sin(p * 0.019 + this.phase[0]) +
@@ -169,6 +208,13 @@ export class Terrain {
 
   /** Height of the path centre line. */
   pathHeight(p: number): number {
+    const h = this.rawPathHeight(p);
+    const g = this.gorgeNear(p, GORGE_FLAT);
+    if (!g) return h;
+    return lerp(h, g.h, 1 - smoothstep(GORGE.deckHalfLen + 1, GORGE_FLAT, Math.abs(p - g.p)));
+  }
+
+  private rawPathHeight(p: number): number {
     const s = this.seed;
     const rolling = 2.1 * fbm1(p * 0.011 + 7, s + 11, 3) + 0.45 * fbm1(p * 0.047 + 3, s + 13, 2);
     return rolling * smoothstep(0, 25, p) + this.hillHeight(p);
@@ -177,6 +223,67 @@ export class Terrain {
   /** Average slope of the path over the next few metres (used for difficulty hints). */
   pathSlope(p: number): number {
     return (this.pathHeight(p + 2) - this.pathHeight(p - 2)) / 4;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Gorges (Greek landscape only, at most two per landscape section)
+
+  /** The gorges of landscape section k (empty unless it is Greek). */
+  gorgesIn(k: number): Gorge[] {
+    let list = this.gorgeCache.get(k);
+    if (list) return list;
+    list = [];
+    if (k > 0 && landscapeOfIndex(k) === 'greece') {
+      const rng = mulberry32(subSeed(this.seed, 12000 + k));
+      GORGE_SLOTS.forEach(([lo, hi], slot) => {
+        if (slot > 0 && rng() > 0.6) return;
+        // Look for a stretch where the track is fairly level and straight.
+        for (let attempt = 0; attempt < 12; attempt++) {
+          const c = k * LANDSCAPE_LENGTH + lo + rng() * (hi - lo);
+          const h = this.rawPathHeight(c);
+          let ok = Math.abs(this.rawCenterX(c + 25) - this.rawCenterX(c - 25)) < 4.5;
+          for (const o of [-24, -12, 12, 24]) if (Math.abs(this.rawPathHeight(c + o) - h) > 1.4) ok = false;
+          if (!ok) continue;
+          list!.push({ p: c, x: this.rawCenterX(c), h });
+          break;
+        }
+      });
+    }
+    this.gorgeCache.set(k, list);
+    return list;
+  }
+
+  /** The gorge whose centre line is within `margin` metres of progress p, if any. */
+  gorgeNear(p: number, margin: number): Gorge | null {
+    const k = Math.floor(p / LANDSCAPE_LENGTH);
+    if (k <= 0 || landscapeOfIndex(k) !== 'greece') return null;
+    for (const g of this.gorgesIn(k)) if (Math.abs(p - g.p) < margin) return g;
+    return null;
+  }
+
+  /** Depth (m) the gorge cuts into the ground at (x, z); 0 outside every gorge. */
+  gorgeCarve(x: number, z: number): number {
+    const p = -z;
+    const g = this.gorgeNear(p, GORGE.half + 1);
+    return g ? this.carveOf(g, p, x - g.x) : 0;
+  }
+
+  private carveOf(g: Gorge, p: number, d: number): number {
+    const ad = Math.abs(d);
+    if (ad >= GORGE.reach) return 0;
+    // Ragged rims; the gorge narrows and closes far from the track.
+    const edge = (GORGE.half - 0.35 + 0.7 * noise1(d * 0.21 + g.p, this.seed + 71)) * (1 - smoothstep(GORGE.reach - 13, GORGE.reach, ad));
+    const u = Math.abs(p - g.p);
+    if (u >= edge) return 0;
+    const t = 1 - smoothstep(edge * 0.38, edge, u);
+    return GORGE.depth * t * (0.85 + 0.15 * noise1(d * 0.33, this.seed + 73));
+  }
+
+  /** True when (x, z) lies on the bridge deck over a gorge. */
+  onBridge(x: number, z: number): boolean {
+    const p = -z;
+    const g = this.gorgeNear(p, GORGE.deckHalfLen);
+    return g !== null && Math.abs(x - g.x) < GORGE.deckHalf;
   }
 
   // ---------------------------------------------------------------------------
@@ -264,18 +371,23 @@ export class Terrain {
     const cx = this.pathCenterX(p);
     const d = x - cx;
     const side: Side = d < 0 ? -1 : 1;
-    return this.groundHeightRow(x, z, cx, this.pathHeight(p), this.sideSlope(p, side));
+    return this.groundHeightRow(x, z, cx, this.pathHeight(p), this.sideSlope(p, side), true);
   }
 
   /**
    * Height with the row-constant terms (path centre, path height, side slope)
    * supplied by the caller. Chunk building evaluates them once per row.
+   * With `deck` the bridge deck over a gorge counts as ground (physics);
+   * without it the gorge is carved out underneath (terrain mesh).
    */
-  groundHeightRow(x: number, z: number, cx: number, pathH: number, slope: number): number {
+  groundHeightRow(x: number, z: number, cx: number, pathH: number, slope: number, deck = false): number {
     const d = x - cx;
     const ad = Math.abs(d);
     const s = this.seed;
-    let h = pathH + this.crossSection(d);
+    const gorge = this.gorgeNear(-z, GORGE.deckHalfLen + 3);
+    // The ruts fade out before the bridge so the deck continues the track without a step.
+    const ruts = gorge ? smoothstep(GORGE.deckHalfLen, GORGE.deckHalfLen + 2.5, Math.abs(-z - gorge.p)) : 1;
+    let h = pathH + this.crossSection(d) * ruts;
     const dd = Math.max(0, ad - CFG.path.halfWidth);
     h += slope * Math.min(dd, 45);
     h += 0.9 * fbm2(x * 0.07, z * 0.07, s + 21, 3) * smoothstep(1.7, 6, ad);
@@ -303,6 +415,9 @@ export class Terrain {
         h += w * (smoothstep(20, 140, far) * 14 * ridge * ridge - far * 0.07 - 6 * fbm2(x * 0.006, z * 0.006 + 9, s + 29, 3) * smoothstep(0, 60, far));
       }
     }
+    if (gorge && !(deck && Math.abs(x - gorge.x) < GORGE.deckHalf && Math.abs(-z - gorge.p) < GORGE.deckHalfLen)) {
+      h -= this.carveOf(gorge, -z, x - gorge.x);
+    }
     return h;
   }
 
@@ -320,6 +435,8 @@ export class Terrain {
   rollingResistance(x: number, z: number): number {
     const { p, d } = this.toPath(x, z);
     const ad = Math.abs(d);
+    // The bridge planks are smooth.
+    if (this.onBridge(x, z)) return 0.9;
     if (ad < CFG.path.halfWidth) {
       const rut = Math.exp(-(((ad - CFG.path.rutCenter) / 0.3) ** 2));
       return lerp(1.5, 0.75, rut);
@@ -367,6 +484,8 @@ export class Terrain {
     farRockDark: new THREE.Color(0xaaa597),
     farScrub: new THREE.Color(0x6e7a40),
     farGold: new THREE.Color(0xbba766),
+    gorgeRock: new THREE.Color(0x9c9282),
+    gorgeDeep: new THREE.Color(0x6e665a),
     // The Egyptian desert.
     sand: new THREE.Color(0xdcb478),
     sandLight: new THREE.Color(0xe8c993),
@@ -514,6 +633,15 @@ export class Terrain {
       }
     } else {
       this.groundColorInner(p, d, x, z, mix, g, w, out);
+    }
+
+    // Bare rock in the gorge, darker towards the bottom.
+    const carve = this.gorgeCarve(x, z);
+    if (carve > 0.15) {
+      const v = valueNoise2(x * 0.4, z * 0.9 + carve * 0.5, s + 75);
+      this.tmpA.copy(P.rock).lerp(P.gorgeRock, smoothstep(-0.3, 0.5, v)).lerp(P.gorgeDeep, smoothstep(6, GORGE.depth, carve) * 0.7);
+      out.lerp(this.tmpA, smoothstep(0.15, 1.2, carve));
+      return out;
     }
 
     // Leaf-litter freckles on the track in autumn, pale gravel in Greece, light sand in the desert.

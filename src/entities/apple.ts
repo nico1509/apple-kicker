@@ -32,6 +32,8 @@ export class Apple {
   maxProgress = 0;
   /** Seconds since the last kick. */
   sinceKick = 999;
+  /** True while a gnome carries the apple off: it moves the apple, physics pauses. */
+  held = false;
   private readonly normal = new THREE.Vector3(0, 1, 0);
   private readonly tmp = new THREE.Vector3();
   private readonly axis = new THREE.Vector3();
@@ -106,6 +108,7 @@ export class Apple {
     this.pos.set(x, this.world.groundHeight(x, z) + this.radius, z);
     this.vel.set(0, 0, 0);
     this.curl = 0;
+    this.held = false;
     this.maxProgress = 0;
     this.resting = true;
     this.onGround = true;
@@ -124,6 +127,18 @@ export class Apple {
     this.sinceKick = 0;
   }
 
+  /** A gnome lets go of the apple: it drops onto the ground at (x, z). */
+  drop(x: number, z: number): void {
+    this.held = false;
+    this.pos.set(x, this.world.groundHeight(x, z) + this.radius + 0.05, z);
+    this.vel.set(0, 0, 0);
+    this.curl = 0;
+    this.resting = false;
+    this.onGround = false;
+    this.accumulator = 0;
+    this.mesh.position.copy(this.pos);
+  }
+
   /** Gentle push, e.g. from the player walking into the apple. Never slows it down. */
   nudge(vx: number, vz: number): void {
     if (Math.hypot(this.vel.x, this.vel.z) > Math.hypot(vx, vz)) return;
@@ -135,6 +150,12 @@ export class Apple {
 
   update(dt: number): void {
     this.sinceKick += dt;
+    if (this.held) {
+      // Carried: the gnome sets the position; the distance does not count.
+      this.accumulator = 0;
+      this.mesh.position.copy(this.pos);
+      return;
+    }
     this.bounceCooldown -= dt;
     this.hitCooldown -= dt;
     this.hopCooldown -= dt;

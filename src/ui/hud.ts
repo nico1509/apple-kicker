@@ -3,7 +3,7 @@ import type { Foot } from '../config';
 export type OverlayKind = 'start' | 'paused' | 'lifelost' | 'gameover' | null;
 export type Difficulty = 'easy' | 'hard';
 /** What ended a life: the storm caught the player or the apple, or the thirst bar ran empty. */
-export type Cause = 'player' | 'apple' | 'thirst';
+export type Cause = 'player' | 'apple' | 'thirst' | 'gorge';
 
 /** Lives in the easy mode. */
 export const EASY_LIVES = 3;
@@ -379,6 +379,7 @@ export class Hud {
 
   private static causeText(cause: Cause): string {
     if (cause === 'thirst') return 'Du bist verdurstet. Unterwegs liegt Apfelschorle!';
+    if (cause === 'gorge') return 'Dein Apfel ist in die Schlucht gefallen.';
     return cause === 'apple' ? 'Das Gewitter hat deinen Apfel eingeholt.' : 'Das Gewitter hat dich eingeholt.';
   }
 
@@ -405,7 +406,7 @@ export class Hud {
     this.overlay.scrollTop = 0;
     this.armedAt = performance.now() + 700;
     this.overlayContent.innerHTML = `
-      <h2>${cause === 'thirst' ? 'Verdurstet!' : cause === 'apple' ? 'Das Gewitter hat deinen Apfel eingeholt!' : 'Vom Gewitter eingeholt!'}</h2>
+      <h2>${cause === 'thirst' ? 'Verdurstet!' : cause === 'gorge' ? 'Der Apfel ist in die Schlucht gefallen!' : cause === 'apple' ? 'Das Gewitter hat deinen Apfel eingeholt!' : 'Vom Gewitter eingeholt!'}</h2>
       ${livesTotal > 0 ? `<div class="lives big" aria-label="Keine Leben mehr">${Hud.livesHtml(0, livesTotal)}</div><p>Alle Leben sind verbraucht.</p>` : ''}
       <p class="score">Dein Apfel kam <b>${Math.floor(score)} m</b> weit.</p>
       ${isRecord ? '<p class="record">Neuer Rekord!</p>' : `<p>Rekord: <b>${Math.floor(best)} m</b></p>`}

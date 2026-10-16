@@ -18,7 +18,9 @@ export type Collider =
       r: number;
       surface: Surface;
       blocksPlayer: boolean;
-    };
+    }
+  /** Invisible vertical wall from (ax, az) to (bx, bz): stops only the player, never the apple. */
+  | { kind: 'wall'; ax: number; az: number; bx: number; bz: number; surface: Surface; blocksPlayer: true };
 
 export interface MudZone {
   x: number;
@@ -36,6 +38,7 @@ export const SURFACES = {
   trunk: { restitution: 0.4, friction: 0.3 },
   post: { restitution: 0.45, friction: 0.2 },
   fur: { restitution: 0.25, friction: 0.55 },
+  metal: { restitution: 0.5, friction: 0.15 },
 } as const satisfies Record<string, Surface>;
 
 /** Result of a closest-point query against a collider. */
@@ -62,6 +65,8 @@ export function sphereContact(
   out: Contact,
 ): Contact | null {
   switch (col.kind) {
+    case 'wall':
+      return null;
     case 'cylinder': {
       if (cy - radius > col.yTop) return null;
       const dx = cx - col.x;
