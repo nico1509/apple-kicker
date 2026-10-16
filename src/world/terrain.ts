@@ -16,7 +16,8 @@ import { LANDSCAPE_LENGTH, landscapeOfIndex, landscapeWeight, type Landscape } f
 export type BiomeType =
   | 'forest' | 'meadow' | 'field' | 'vineyard' | 'hedge'
   | 'phrygana' | 'olive' | 'stubble' | 'farmstead'
-  | 'dunes' | 'oasis' | 'ruins' | 'blackdesert';
+  | 'dunes' | 'oasis' | 'ruins' | 'blackdesert'
+  | 'snowfield' | 'shore' | 'rookery';
 export type Side = -1 | 1;
 
 export interface BiomeMix {
@@ -39,12 +40,14 @@ const SLOPE_BIAS: Record<BiomeType, number> = {
   vineyard: 0.17, hedge: 0.08, field: -0.02, forest: 0.05, meadow: 0,
   phrygana: 0.14, olive: 0.09, stubble: -0.02, farmstead: 0.02,
   dunes: 0.04, oasis: -0.03, ruins: 0.03, blackdesert: 0.02,
+  snowfield: 0.06, shore: -0.16, rookery: 0.1,
 };
 /** Rolling resistance (m/s²) of the ground beside the lane. */
 const ROLL_RES: Record<BiomeType, number> = {
   field: 3.6, forest: 1.9, hedge: 2.2, vineyard: 2.0, meadow: 1.9,
   phrygana: 2.4, olive: 2.0, stubble: 2.8, farmstead: 1.9,
   dunes: 3.4, oasis: 2.2, ruins: 2.4, blackdesert: 2.6,
+  snowfield: 3.0, shore: 2.8, rookery: 2.4,
 };
 const BIOME_WEIGHTS: Record<Landscape, Array<[BiomeType, number]>> = {
   forest: [
@@ -66,7 +69,15 @@ const BIOME_WEIGHTS: Record<Landscape, Array<[BiomeType, number]>> = {
     ['ruins', 0.22],
     ['oasis', 0.2],
   ],
+  antarctic: [
+    ['snowfield', 0.4],
+    ['shore', 0.34],
+    ['rookery', 0.26],
+  ],
 };
+/** In Antarctica the sea lies this far below the lowest bit of track nearby. */
+const SEA_BELOW = 1.6;
+const SEA_CELL = 20;
 
 /**
  * A rocky gorge across the track in the Greek landscape, spanned by a steel
@@ -107,6 +118,7 @@ export class Terrain {
   private readonly hillCache = new Map<number, Hill[]>();
   private readonly stepOffsetCache = new Map<number, number>();
   private readonly biomeCache = new Map<number, BiomeType>();
+  private readonly seaCache = new Map<number, number>();
   private readonly mixScratch: BiomeMix = { a: 'meadow', b: 'meadow', t: 1 };
   private readonly gorgeCache = new Map<number, Gorge[]>();
 
@@ -225,6 +237,26 @@ export class Terrain {
   /** Average slope of the path over the next few metres (used for difficulty hints). */
   pathSlope(p: number): number {
     return (this.pathHeight(p + 2) - this.pathHeight(p - 2)) / 4;
+  }
+
+  /**
+   * Height of the Antarctic sea: a little below the lowest point of the track
+   * within ±60 m, so it never floods the track and changes only slowly.
+   */
+  seaLevel(p: number): number {
+    const u = Math.max(0, p) / SEA_CELL;
+    const k = Math.floor(u);
+    return lerp(this.seaCell(k), this.seaCell(k + 1), smoothstep(0, 1, u - k));
+  }
+
+  private seaCell(k: number): number {
+    const cached = this.seaCache.get(k);
+    if (cached !== undefined) return cached;
+    let lo = Infinity;
+    for (let q = k * SEA_CELL - 60; q <= k * SEA_CELL + 60; q += 4) lo = Math.min(lo, this.pathHeight(Math.max(0, q)));
+    const h = lo - SEA_BELOW;
+    this.seaCache.set(k, h);
+    return h;
   }
 
   // ---------------------------------------------------------------------------
@@ -403,6 +435,7 @@ export class Terrain {
       const ridge = 1 - Math.abs(fbm2(x * 0.03 + 5, z * 0.012, s + 25, 2));
       h += w * smoothstep(4, 14, ad) * 1.8 * ridge * ridge;
     }
+    const a = landscapeWeight(-z, 'antarctic');
     const ax = Math.abs(x);
     if (ax > CFG.chunk.halfWidth) {
       // Distant wooded hills rising towards the horizon.
@@ -419,6 +452,18 @@ export class Terrain {
         const ridge = 1 - Math.abs(fbm2(x * 0.008 + 41, z * 0.005, s + 35, 2));
         h += w * (smoothstep(20, 140, far) * 14 * ridge * ridge - far * 0.07 - 6 * fbm2(x * 0.006, z * 0.006 + 9, s + 29, 3) * smoothstep(0, 60, far));
       }
+    }
+    if (a > 0) {
+      // Antarctica: the land ends in the sea; snowy mountains rise behind it.
+      const sea = this.seaLevel(-z);
+      const far = ax - CFG.chunk.halfWidth;
+      let ha = Math.max(h, sea);
+      if (far > -10) {
+        ha = lerp(ha, sea, smoothstep(-10, 25, far));
+        const ridge = 1 - Math.abs(fbm2(x * 0.006 + 61, z * 0.005, s + 37, 3));
+        ha += smoothstep(125, 220, far) * (14 + 75 * ridge * ridge + 5 * fbm2(x * 0.04, z * 0.04, s + 39, 2));
+      }
+      h = lerp(h, ha, a);
     }
     if (gorge && !(deck && Math.abs(x - gorge.x) < GORGE.deckHalf && Math.abs(-z - gorge.p) < GORGE.deckHalfLen)) {
       h -= this.carveOf(gorge, -z, x - gorge.x);
@@ -502,6 +547,17 @@ export class Terrain {
     oasisGrass: new THREE.Color(0x8c9a48),
     farSand: new THREE.Color(0xdcb070),
     farSandShade: new THREE.Color(0xc4975a),
+    // Antarctica.
+    snow: new THREE.Color(0xeef3f8),
+    snowShade: new THREE.Color(0xd3dfeb),
+    snowBlue: new THREE.Color(0xbccde0),
+    snowPath: new THREE.Color(0xd9e1ea),
+    snowPathDark: new THREE.Color(0xb7c4d3),
+    darkRock: new THREE.Color(0x3a322e),
+    rockBrown: new THREE.Color(0x5e4b40),
+    sea: new THREE.Color(0x3c6a8c),
+    seaDeep: new THREE.Color(0x2f5878),
+    floe: new THREE.Color(0xe6eef5),
   };
 
   private readonly tmpA = new THREE.Color();
@@ -589,6 +645,22 @@ export class Terrain {
         const green = smoothstep(-0.1, 0.4, n) * (1 - smoothstep(14, 30, ad));
         return out.copy(P.sand).lerp(P.oasisGrass, green * 0.85);
       }
+      case 'snowfield': {
+        // Wind-blown snow with soft blue hollows.
+        out.copy(P.snow).lerp(P.snowShade, smoothstep(-0.2, 0.5, n) * 0.7);
+        return out.lerp(P.snowBlue, smoothstep(0.55, 0.85, valueNoise2(x * 0.08, z * 0.08, s + 57)) * 0.5);
+      }
+      case 'shore': {
+        // Snow with the odd dark stone showing through towards the water.
+        out.copy(P.snow).lerp(P.snowShade, smoothstep(-0.3, 0.4, n) * 0.6);
+        return out.lerp(P.darkRock, smoothstep(0.6, 0.85, valueNoise2(x * 0.25, z * 0.25, s + 59)) * smoothstep(4, 9, ad) * 0.8);
+      }
+      case 'rookery': {
+        // Bare dark rock and brown, trodden ground where the penguins nest.
+        const bare = smoothstep(-0.1, 0.35, n + 0.2 * Math.sin(p * 0.05)) * smoothstep(3.5, 7, ad);
+        this.tmpB.copy(P.darkRock).lerp(P.rockBrown, smoothstep(0.2, 0.7, valueNoise2(x * 0.3, z * 0.3, s + 63)) * 0.7);
+        return out.copy(P.snow).lerp(P.snowShade, smoothstep(-0.3, 0.4, n) * 0.5).lerp(this.tmpB, bare);
+      }
     }
   }
 
@@ -598,13 +670,16 @@ export class Terrain {
     const cx = this.pathCenterX(p);
     const d = x - cx;
     const mix = this.biomeMix(p, d < 0 ? -1 : 1, this.mixColor);
-    return this.groundColorRow(x, z, cx, mix, out);
+    return this.groundColorRow(x, z, cx, mix, out, this.groundHeight(x, z));
   }
 
   private readonly mixColor: BiomeMix = { a: 'meadow', b: 'meadow', t: 1 };
 
-  /** Ground colour with the row-constant path centre and biome mix supplied by the caller. */
-  groundColorRow(x: number, z: number, cx: number, mix: BiomeMix, out: THREE.Color): THREE.Color {
+  /**
+   * Ground colour with the row-constant path centre and biome mix supplied by
+   * the caller. y (the ground height there) is needed for the Antarctic sea.
+   */
+  groundColorRow(x: number, z: number, cx: number, mix: BiomeMix, out: THREE.Color, y = Infinity): THREE.Color {
     const P = Terrain.PAL;
     const p = -z;
     const d = x - cx;
@@ -613,6 +688,7 @@ export class Terrain {
     const s = this.seed;
     const g = landscapeWeight(p, 'greece');
     const w = landscapeWeight(p, 'desert');
+    const an = landscapeWeight(p, 'antarctic');
 
     if (ax > CFG.chunk.halfWidth - 2) {
       const far = ax - CFG.chunk.halfWidth;
@@ -631,13 +707,31 @@ export class Terrain {
         this.tmpA.copy(P.farSand).lerp(P.farSandShade, smoothstep(-0.2, 0.5, v) * 0.7);
         out.lerp(this.tmpA, w);
       }
+      if (an > 0) {
+        // Snowy mountains with dark rock on the steep ridges.
+        this.tmpA.copy(P.snow).lerp(P.snowBlue, smoothstep(-0.3, 0.5, v) * 0.6);
+        this.tmpA.lerp(P.darkRock, smoothstep(0.62, 0.8, valueNoise2(x * 0.02, z * 0.035, s + 65)) * smoothstep(135, 185, far) * 0.85);
+        out.lerp(this.tmpA, an);
+      }
       // Blend into the detailed terrain colour.
       if (far < 0) {
-        const inner = this.groundColorInner(p, d, x, z, mix, g, w, this.tmpB);
+        const inner = this.groundColorInner(p, d, x, z, mix, g, w, an, this.tmpB);
         out.lerp(inner, smoothstep(0, -2, far));
       }
     } else {
-      this.groundColorInner(p, d, x, z, mix, g, w, out);
+      this.groundColorInner(p, d, x, z, mix, g, w, an, out);
+    }
+    if (an > 0 && y < Infinity) {
+      // The sea, with floating ice floes.
+      const sea = this.seaLevel(p);
+      const water = (1 - smoothstep(sea + 0.04, sea + 0.3, y)) * an;
+      if (water > 0) {
+        this.tmpA.copy(P.sea).lerp(P.seaDeep, smoothstep(-0.2, 0.5, fbm2(x * 0.02, z * 0.02, s + 67, 2)));
+        // Only on the detailed grid; out on the coarse backdrop the floes are models.
+        const floe = smoothstep(0.78, 0.82, valueNoise2(x * 0.12, z * 0.12, s + 69)) * (1 - smoothstep(CFG.chunk.halfWidth - 8, CFG.chunk.halfWidth - 2, ax));
+        this.tmpA.lerp(P.floe, floe);
+        out.lerp(this.tmpA, water);
+      }
     }
 
     // Bare rock in the gorge, darker towards the bottom.
@@ -651,26 +745,28 @@ export class Terrain {
 
     // Leaf-litter freckles on the track in autumn, pale gravel in Greece, light sand in the desert.
     if (ad < 2.4 && hash3(Math.floor(x * 2), Math.floor(z * 2), s + 61) > 0.9) {
-      out.lerp(this.tmpA.setHex(0xb07a3a).lerp(P.dryGrassPale, g).lerp(P.sandLight, w), 0.3);
+      out.lerp(this.tmpA.setHex(0xb07a3a).lerp(P.dryGrassPale, g).lerp(P.sandLight, w).lerp(P.snow, an), 0.3);
     }
     return out;
   }
 
   private readonly vergeTmp = new THREE.Color();
 
-  /** g, w: weights of the Greek and the desert landscape (0..1) for the colours of the track and verge. */
-  private groundColorInner(p: number, d: number, x: number, z: number, mix: BiomeMix, g: number, w: number, out: THREE.Color): THREE.Color {
+  /** g, w, an: weights of the Greek, the desert and the Antarctic landscape (0..1) for the colours of the track and verge. */
+  private groundColorInner(p: number, d: number, x: number, z: number, mix: BiomeMix, g: number, w: number, an: number, out: THREE.Color): THREE.Color {
     const P = Terrain.PAL;
     const ad = Math.abs(d);
     const s = this.seed;
-    const verge = this.vergeTmp.copy(P.verge).lerp(P.gVerge, g).lerp(P.sandVerge, w);
+    const verge = this.vergeTmp.copy(P.verge).lerp(P.gVerge, g).lerp(P.sandVerge, w).lerp(P.snow, an);
     if (ad < CFG.path.halfWidth + 0.35) {
       const rut = Math.exp(-(((ad - CFG.path.rutCenter) / 0.3) ** 2));
       const dirtVar = smoothstep(-0.4, 0.5, valueNoise2(x * 0.5, z * 0.5, s + 31));
       this.tmpA.copy(P.dirt).lerp(P.dirtDark, dirtVar * 0.6);
       if (g > 0) this.tmpA.lerp(this.tmpB.copy(P.gDirt).lerp(P.gDirtDark, dirtVar * 0.6), g);
       if (w > 0) this.tmpA.lerp(this.tmpB.copy(P.sandPathDark).lerp(P.sandPath, dirtVar * 0.6), w);
-      out.copy(P.pathGrass).lerp(P.gPathGrass, g).lerp(P.sandVerge, w).lerp(this.tmpA, smoothstep(0.25, 0.75, rut));
+      // Packed snow with bluish tracks in Antarctica.
+      if (an > 0) this.tmpA.lerp(this.tmpB.copy(P.snowPathDark).lerp(P.snowPath, dirtVar * 0.5), an);
+      out.copy(P.pathGrass).lerp(P.gPathGrass, g).lerp(P.sandVerge, w).lerp(P.snowPath, an).lerp(this.tmpA, smoothstep(0.25, 0.75, rut));
       // The track fades into the verge.
       out.lerp(verge, smoothstep(CFG.path.halfWidth - 0.3, CFG.path.halfWidth + 0.35, ad));
       return out;
@@ -798,7 +894,7 @@ export class Terrain {
       const cxF = (a.x + b.x + c.x) / 3;
       const czF = (a.z + b.z + c.z) / 3;
       const cx = rowCx[rowIndex];
-      this.groundColorRow(cxF, czF, cx, cxF < cx ? mixL[rowIndex] : mixR[rowIndex], color);
+      this.groundColorRow(cxF, czF, cx, cxF < cx ? mixL[rowIndex] : mixR[rowIndex], color, (a.y + b.y + c.y) / 3 - yOffset);
       const bright = 0.97 + 0.06 * facet;
       const cr = color.r * bright;
       const cg = color.g * bright;

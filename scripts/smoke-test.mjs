@@ -274,7 +274,7 @@ try {
   check(m3.appleIndicator, `apple 75 m away in view is marked (indicator=${m3.appleIndicator})`);
 
   // The landscape changes every 1000 m and loops back to the forest.
-  for (const [at, expected, name] of [[1150, 'greece', '05c-greece.png'], [1620, 'greece', '05d-greece-later.png'], [2150, 'desert', '05e-desert.png'], [3150, 'forest', '05f-forest-again.png']]) {
+  for (const [at, expected, name] of [[1150, 'greece', '05c-greece.png'], [1620, 'greece', '05d-greece-later.png'], [2150, 'desert', '05e-desert.png'], [3150, 'antarctic', '05f-antarctic.png'], [4150, 'forest', '05h-forest-again.png']]) {
     await page.evaluate((p) => window.__appleKicker.teleport(p), at);
     await look(0, -0.12);
     await simulate(0.3);
@@ -283,7 +283,7 @@ try {
     check(sl.landscape === expected, `landscape at ${at} m is ${expected} (${sl.landscape})`);
   }
   const rg = await walkAndKick('right', 320, 0);
-  check(rg.after.appleMax > 3150, `apple still moves after the landscapes looped (${rg.after.appleMax.toFixed(1)} m)`);
+  check(rg.after.appleMax > 4150, `apple still moves after the landscapes looped (${rg.after.appleMax.toFixed(1)} m)`);
   await page.evaluate(() => window.__appleKicker.teleport(1300));
   const rg2 = await walkAndKick('right', 320, 0);
   check(rg2.after.appleMax > 1300, `apple moves through Greek obstacles (${rg2.after.appleMax.toFixed(1)} m)`);
@@ -343,6 +343,88 @@ try {
     const moved = Math.hypot(after.playerX - before.playerX, after.playerZ - before.playerZ);
     check(moved > 4.5, `a spit pushes the player at least 5 m (${moved.toFixed(2)} m)`);
   }
+  // Antarctica: obstacles on the track, and the ice monster with its icicles.
+  await page.evaluate(() => window.__appleKicker.teleport(3300));
+  const ra = await walkAndKick('right', 320, 0);
+  check(ra.after.appleMax > 3300, `apple moves through Antarctic obstacles (${ra.after.appleMax.toFixed(1)} m)`);
+  const visits = await page.evaluate(() => {
+    const m = window.__appleKicker.game.iceMonster;
+    return [0, 1, 2, 3, 7].map((k) => m.triggersIn(k).length);
+  });
+  check(visits[3] >= 3 && visits[3] <= 4 && visits[4] >= 3 && visits[4] <= 4, `the ice monster turns up 3–4 times per Antarctic landscape (${visits[3]}, ${visits[4]})`);
+  check(visits[0] + visits[1] + visits[2] === 0, `no ice monster elsewhere (${visits.slice(0, 3).join(', ')})`);
+  // One in the next Antarctic landscape (the one at 3000 m may already be behind us).
+  const trigger = await page.evaluate(() => window.__appleKicker.game.iceMonster.triggersIn(7)[0]);
+  await page.evaluate((t) => {
+    const k = window.__appleKicker;
+    k.teleport(t - 30);
+    k.game.storm.progress = t - 120;
+  }, trigger);
+  await simulate(0.5);
+  check((await state()).monster === 'idle', 'the ice monster waits until the player comes near');
+  // Walk up to it (stepping round the apple), then stand and watch.
+  await page.evaluate((t) => {
+    const g = window.__appleKicker.game;
+    g.debugTeleport(t - 17);
+    g.storm.progress = t - 120;
+    g.apple.reset(g.world.terrain.pathCenterX(t - 15), -(t - 15));
+  }, trigger);
+  await simulate(0.1);
+  const im0 = await state();
+  check(im0.monster === 'enter' && im0.monsterAppearances === 1, `the ice monster charges onto the track (${im0.monster})`);
+  const lookAtMonster = () => page.evaluate(() => {
+    const g = window.__appleKicker.game;
+    const m = g.iceMonster.group.position;
+    const p = g.player.pos;
+    g.debugLook(Math.atan2(-(m.x - p.x), -(m.z - p.z)), -0.15);
+  });
+  let im1 = im0;
+  for (let i = 0; i < 12 && im1.monster !== 'rage'; i++) {
+    await simulate(0.5);
+    im1 = await state();
+  }
+  check(im1.monster === 'rage', `it reaches the track and rages there (${im1.monster})`);
+  await simulate(2.5);
+  await lookAtMonster();
+  await simulate(0.05);
+  await shot('05i-ice-monster.png');
+  let im2 = await state();
+  for (let i = 0; i < 20 && im2.monster !== 'idle'; i++) {
+    await simulate(0.5);
+    im2 = await state();
+  }
+  check(im2.monster === 'idle', `after a few seconds it runs off again (${im2.monster})`);
+  check(im2.icicles >= 3, `it leaves icicles on the track (${im2.icicles})`);
+  const ice = await page.evaluate(() => {
+    const g = window.__appleKicker.game;
+    const t = g.world.terrain;
+    let off = 0;
+    let blocked = 0;
+    let minGap = Infinity;
+    const list = g.iceMonster.icicles;
+    for (const ic of list) {
+      off = Math.max(off, Math.abs(ic.x - t.pathCenterX(ic.p)));
+      let hit = false;
+      g.world.colliders.forEachNear(ic.z, (c) => {
+        if (c === ic.collider) hit = true;
+      });
+      if (hit) blocked++;
+      for (const o of list) if (o !== ic) minGap = Math.min(minGap, Math.hypot(o.x - ic.x, o.z - ic.z));
+    }
+    const ps = list.map((ic) => ic.p);
+    return { off, blocked, n: list.length, minGap, clear: g.respawnClear(Math.min(...ps) - 0.6), from: Math.min(...ps), to: Math.max(...ps) };
+  });
+  check(ice.off < 2.3, `icicles stand on the track (max ${ice.off.toFixed(2)} m off centre)`);
+  check(ice.blocked === ice.n, `every icicle is an obstacle (${ice.blocked}/${ice.n} colliders)`);
+  check(ice.minGap >= 1.5, `icicles leave room to get through (closest ${ice.minGap.toFixed(2)} m)`);
+  check(!ice.clear, 'nobody respawns among the icicles');
+  await page.evaluate((from) => {
+    const g = window.__appleKicker.game;
+    g.player.reset(g.world.terrain.pathCenterX(from - 4), -(from - 4), 0);
+    g.debugLook(0, -0.2);
+  }, ice.from);
+  await simulate(0.05);
+  await shot('05j-icicles.png');
   // Back to the state the storm checks below expect: player at 300 m, apple far ahead.
   await page.evaluate(() => window.__appleKicker.teleport(300));
   await placeApple(375);

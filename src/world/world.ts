@@ -141,9 +141,9 @@ export class World {
     return this.terrain.groundNormal(x, z, out);
   }
 
-  /** Total rolling resistance (ground type + puddles) in m/s². */
+  /** Total rolling resistance (ground type + puddles, less on glassy ice) in m/s². */
   rollingResistance(x: number, z: number): number {
-    return this.terrain.rollingResistance(x, z) + this.colliders.mudAt(x, z);
+    return Math.max(0.2, this.terrain.rollingResistance(x, z) + this.colliders.mudAt(x, z));
   }
 
   dispose(): void {

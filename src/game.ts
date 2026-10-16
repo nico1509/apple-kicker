@@ -4,6 +4,7 @@ import { CFG, type Foot } from './config';
 import { Apple } from './entities/apple';
 import { CamelSpit, SPIT_PUSH, type Camel } from './entities/camel';
 import { GnomeBand, type Gnome } from './entities/gnome';
+import { IceMonster } from './entities/icemonster';
 import { Input } from './entities/input';
 import { Player, type PlayerEvents } from './entities/player';
 import { EASY_LIVES, Hud, type Cause, type Difficulty } from './ui/hud';
@@ -54,6 +55,7 @@ export class Game {
   readonly storm: Storm;
   readonly spit: CamelSpit;
   readonly gnomeBand: GnomeBand;
+  readonly iceMonster: IceMonster;
   world: World;
   player!: Player;
   apple!: Apple;
@@ -143,6 +145,13 @@ export class Game {
       },
       pathOffset: (x, z) => x - this.world.terrain.pathCenterX(-z),
     });
+    this.iceMonster = new IceMonster(this.scene, {
+      groundHeight: (x, z) => this.world.groundHeight(x, z),
+      pathCenterX: (p) => this.world.terrain.pathCenterX(p),
+      get colliders() {
+        return world().colliders;
+      },
+    });
 
     this.playerEvents = {
       onKick: (power, chip) => {
@@ -216,6 +225,7 @@ export class Game {
     this.apple.reset(this.world.terrain.pathCenterX(APPLE_AHEAD), -APPLE_AHEAD);
     this.storm.reset();
     this.spit.clear();
+    this.iceMonster.reset(this.seed);
     this.elapsed = 0;
     this.lives = this.maxLives();
     this.quench();
@@ -422,6 +432,7 @@ export class Game {
     const p = this.respawnProgress(reached);
     this.placeOnPath(p);
     this.apple.maxProgress = reached;
+    this.iceMonster.dismiss();
     this.storm.reset();
     this.storm.progress = p - CFG.storm.startBehind;
     // The storm starts slow again, as at the start of a run.
@@ -470,6 +481,7 @@ export class Game {
     for (const g of this.gnomes()) {
       if (g.state !== 'down' && Math.abs(-g.group.position.z - (p + APPLE_AHEAD / 2)) < 8) return false;
     }
+    if (this.iceMonster.active && Math.abs(this.iceMonster.progress - (p + APPLE_AHEAD / 2)) < 15) return false;
     if (Math.abs(t.pathSlope(p)) > 0.08 || Math.abs(t.pathSlope(p + APPLE_AHEAD)) > 0.08) return false;
     for (let q = p - 1; q <= p + APPLE_AHEAD + 1.5; q += 0.25) {
       const x = t.pathCenterX(q);
@@ -610,6 +622,19 @@ export class Game {
         this.audio.hit(0.6);
         this.hud.message('Ein Wichtel hat deinen Apfel geklaut! Kick ihn um!', 2400, 'bad');
       },
+    });
+    this.iceMonster.update(dt, this.player, this.apple, playing, {
+      onAppear: () => {
+        this.audio.roar();
+        this.hud.message('Ein Eismonster! Vorsicht vor den Eiszapfen!', 2600, 'bad');
+      },
+      onIcicle: () => this.audio.iceCrack(),
+      onBump: (dx, dz) => {
+        this.player.shove(dx, dz);
+        this.audio.hit(1);
+        this.hud.message('Umgerannt!', 1000, 'bad');
+      },
+      onKnockApple: (vx, vz) => this.apple.nudge(vx, vz),
     });
     this.storm.update(dt, this.elapsed, this.player.pos, this.chasedProgress(), playing);
     const globalDark = this.globalDarkness();
@@ -831,6 +856,7 @@ export class Game {
     this.apple.maxProgress = progress;
     this.storm.progress = progress - CFG.storm.startBehind;
     this.world.prewarm(-progress);
+    this.iceMonster.dismiss();
     this.quench();
   }
 
@@ -908,6 +934,9 @@ export class Game {
       pathAheadX: this.world.terrain.pathCenterX(this.apple.progress + 12),
       chunks: this.world.generated,
       landscape: landscapeAt(this.player.progress),
+      monster: this.iceMonster.phase,
+      monsterAppearances: this.iceMonster.appearances,
+      icicles: this.iceMonster.icicles.length,
       drawCalls: this.renderer.info.render.calls,
       triangles: this.renderer.info.render.triangles,
       seed: this.seed,
@@ -926,6 +955,7 @@ export class Game {
     this.player.dispose();
     this.storm.dispose();
     this.spit.dispose();
+    this.iceMonster.dispose();
     this.sky.dispose();
     this.renderer.dispose();
   }

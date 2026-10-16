@@ -80,6 +80,21 @@ const MUD_BRICK = [C(0xc9a46c), C(0xd4b07a), C(0xbf9860)];
 const SANDSTONE = [C(0xd8b47a), C(0xcda66a), C(0xe0c08a)];
 const BASALT = [C(0x3e332c), C(0x4a3d34), C(0x352b25)];
 const PYRAMID = [C(0xd8b072), C(0xcfa566)];
+const PENGUIN_BLACK = [C(0x1d2024), C(0x24272c), C(0x2a2c30)];
+const PENGUIN_WHITE = C(0xf2f2ee);
+const PENGUIN_ORANGE = [C(0xe8642a), C(0xf07a30)];
+const DARK_ROCK = [C(0x3a322e), C(0x463c36), C(0x2f2926), C(0x54473e)];
+const SNOW_CAP = [C(0xeef3f8), C(0xe2eaf2)];
+const ICE = [C(0xe8f1f8), C(0xd2e4f2), C(0xbcd8ee), C(0xf4f8fb)];
+// The orange research equipment.
+const RESEARCH_ORANGE = [C(0xf07a1e), C(0xe8701a)];
+const RESEARCH_TEAL = C(0x1fa7b8);
+const RESEARCH_GLASS = C(0x5fd0e6);
+const RESEARCH_NAVY = C(0x1f3550);
+const RESEARCH_GREY = C(0x8a9096);
+const RESEARCH_BLACK = C(0x24262a);
+const RESEARCH_WHITE = C(0xf2f2ee);
+const SOLAR = C(0x24407a);
 const TRUNK_COLORS = [C(0x6b4d33), C(0x7a5a3c), C(0x5a4330)];
 const POST_COLOR = C(0x8a7a62);
 const RAIL_COLOR = C(0x9c8a6b);
@@ -387,7 +402,7 @@ export class Decor {
       const z = -p;
       const y = this.terrain.groundHeight(x, z) + 0.012;
       const s = rand(rng, 0.05, 0.1);
-      if (rng() < landscapeWeight(p, 'desert')) continue;
+      if (rng() < landscapeWeight(p, 'desert') + landscapeWeight(p, 'antarctic')) continue;
       const greek = rng() < landscapeWeight(p, 'greece');
       if (greek) this.place(b.leaf, x, y, z, s * 0.6, 1, s * 0.5, rng() * 6.28, this.pickColor(CANOPY_COLORS.pebble, rng, 0.08));
       else this.place(b.leaf, x, y, z, s, 1, s * rand(rng, 0.6, 1), rng() * 6.28, this.pickColor(CANOPY_COLORS.leaf, rng, 0.1));
@@ -421,8 +436,10 @@ export class Decor {
       else if (biome === 'olive') d = rand(rng, 1.3, 3.0);
       else d = rand(rng, 1.3, 30);
       if ((biome === 'dunes' && rng() < 0.75) || (biome === 'blackdesert' && rng() < 0.85)) continue;
+      // No grass in the snow; a few dry tufts only between the rocks of the rookery.
+      if (biome === 'snowfield' || biome === 'shore' || (biome === 'rookery' && rng() < 0.8)) continue;
       const dry = biome === 'phrygana' || biome === 'olive' || biome === 'stubble' || biome === 'farmstead'
-        || biome === 'dunes' || biome === 'blackdesert' || biome === 'ruins';
+        || biome === 'dunes' || biome === 'blackdesert' || biome === 'ruins' || biome === 'rookery';
       const x = this.terrain.pathCenterX(p) + side * d;
       const z = -p;
       const y = this.terrain.groundHeight(x, z) - 0.02;
@@ -448,6 +465,16 @@ export class Decor {
         const ax = rand(rng, CFG.chunk.halfWidth + 3, CFG.chunk.farExtent - 10);
         const x = side * ax;
         const z = rand(rng, zFar, zNear);
+        if (rng() < landscapeWeight(-z, 'antarctic')) {
+          // Ice floes and the odd iceberg drifting on the sea.
+          if (rng() < 0.8) continue;
+          const y = this.terrain.groundHeight(x, z);
+          if (y > this.terrain.seaLevel(-z) + 0.05) continue;
+          const berg = rng() < 0.25;
+          const s = berg ? rand(rng, 2, 6) : rand(rng, 1.5, 5);
+          this.place(ax < 100 ? b.farBlob : b.farBlobLod, x, y - (berg ? s * 0.2 : 0.05), z, s * rand(rng, 0.8, 1.4), berg ? s * rand(rng, 0.6, 1.1) : 0.25, s, rng() * 6.28, this.pickColor(ICE, rng, 0.04));
+          continue;
+        }
         if (rng() < landscapeWeight(-z, 'greece')) {
           // Sparse scrub and cypresses below bare mountains.
           if (rng() < 0.45 || rng() < smoothstep(90, 200, ax)) continue;
@@ -830,6 +857,190 @@ export class Decor {
     }
   }
 
+
+  // ---------------------------------------------------------------------------
+  // Antarctica
+
+  /**
+   * A gentoo penguin, about 0.75 m tall: black back, white belly, orange beak
+   * and feet. It faces `yaw`. With a collider when it stands near the track.
+   */
+  private addPenguin(b: Batches, chunk: number, x: number, z: number, yaw: number, rng: Rng, collider: boolean): void {
+    const y = this.terrain.groundHeight(x, z);
+    const s = rand(rng, 0.85, 1.1);
+    const fx = Math.sin(yaw);
+    const fz = Math.cos(yaw);
+    const rx = Math.cos(yaw);
+    const rz = -Math.sin(yaw);
+    const lean = rand(rng, -0.12, 0.08);
+    const black = this.pickColor(PENGUIN_BLACK, rng, 0.05).clone();
+    const orange = this.pickColor(PENGUIN_ORANGE, rng, 0.04).clone();
+    this.place(b.bush, x, y + 0.32 * s, z, 0.19 * s, 0.32 * s, 0.18 * s, yaw, black, lean);
+    this.place(b.bush, x + fx * 0.055 * s, y + 0.29 * s, z + fz * 0.055 * s, 0.155 * s, 0.26 * s, 0.14 * s, yaw, PENGUIN_WHITE, lean);
+    const hy = y + 0.66 * s;
+    const hx = x + fx * 0.02 * s;
+    const hz = z + fz * 0.02 * s;
+    this.place(b.bush, hx, hy, hz, 0.115 * s, 0.11 * s, 0.12 * s, yaw, black);
+    // White patches above the eyes.
+    for (const side of [-1, 1]) {
+      this.place(b.bush, hx + rx * side * 0.08 * s + fx * 0.04 * s, hy + 0.04 * s, hz + rz * side * 0.08 * s + fz * 0.04 * s, 0.03 * s, 0.022 * s, 0.035 * s, yaw, PENGUIN_WHITE);
+    }
+    this.place(b.box, hx + fx * 0.11 * s, hy - 0.035 * s, hz + fz * 0.11 * s, 0.035 * s, 0.035 * s, 0.11 * s, yaw, orange, 0.15);
+    // Flippers held a little away from the body.
+    for (const side of [-1, 1]) {
+      this.place(b.box, x + rx * side * 0.18 * s, y + 0.5 * s, z + rz * side * 0.18 * s, 0.025 * s, 0.3 * s, 0.09 * s, yaw, black, Math.PI, -side * rand(rng, 0.2, 0.55));
+      this.place(b.box, x + rx * side * 0.06 * s + fx * 0.06 * s, y, z + rz * side * 0.06 * s + fz * 0.06 * s, 0.07 * s, 0.03 * s, 0.11 * s, yaw + side * 0.25, orange);
+    }
+    if (collider) this.colliders.add(chunk, { kind: 'cylinder', x, z, r: 0.2 * s, yTop: y + 0.7 * s, surface: SURFACES.fur, blocksPlayer: true });
+  }
+
+  /** A few penguins standing together, roughly facing the same way. */
+  private addPenguinGroup(b: Batches, chunk: number, x: number, z: number, count: number, spread: number, rng: Rng, collider: boolean): void {
+    const yaw0 = rng() * Math.PI * 2;
+    const cx = this.terrain.pathCenterX(-z);
+    for (let k = 0; k < count; k++) {
+      const a = rng() * Math.PI * 2;
+      const r = spread * Math.sqrt(rng());
+      let px = x + Math.cos(a) * r;
+      const pz = z + Math.sin(a) * r;
+      // Never on the lane.
+      const d = px - cx;
+      const minD = CFG.path.halfWidth + 0.45;
+      if (Math.abs(d) < minD) px = cx + (d < 0 ? -1 : 1) * minD;
+      if (this.terrain.groundHeight(px, pz) < this.terrain.seaLevel(-pz) + 0.15) continue;
+      this.addPenguin(b, chunk, px, pz, yaw0 + rand(rng, -0.9, 0.9), rng, collider && Math.abs(px - cx) < 7);
+    }
+  }
+
+  /** A dark rock with a cap of snow. */
+  private addSnowyRock(b: Batches, chunk: number, x: number, z: number, rng: Rng, scale = 1): void {
+    const r = rand(rng, 0.3, 0.9) * scale;
+    x = this.clearOfLane(x, z, r * 1.3);
+    const y = this.terrain.groundHeight(x, z) + r * 0.15;
+    const sx = r * rand(rng, 1.0, 1.4);
+    const sy = r * rand(rng, 0.6, 0.95);
+    const sz = r * rand(rng, 1.0, 1.3);
+    const yaw = rng() * 6.28;
+    this.place(b.rock, x, y, z, sx, sy, sz, yaw, this.pickColor(DARK_ROCK, rng, 0.05), rand(rng, -0.2, 0.2), rand(rng, -0.2, 0.2));
+    if (rng() < 0.75) this.place(b.bush, x, y + sy * 0.62, z, sx * 0.75, sy * 0.32, sz * 0.75, yaw, this.pickColor(SNOW_CAP, rng, 0.02));
+    this.colliders.add(chunk, { kind: 'sphere', x, y, z, r: r * 0.95, surface: SURFACES.stone, blocksPlayer: r > 0.35 });
+  }
+
+  /** A block of ice floating in the water by the shore. */
+  private addIceberg(b: Batches, x: number, z: number, rng: Rng): void {
+    const sea = this.terrain.seaLevel(-z);
+    const s = rand(rng, 0.6, 2.2);
+    const flat = rng() < 0.6;
+    this.place(b.rock, x, sea - (flat ? 0.04 : s * 0.25), z, s * rand(rng, 1, 1.6), flat ? rand(rng, 0.12, 0.25) : s * rand(rng, 0.6, 1.0), s, rng() * 6.28, this.pickColor(ICE, rng, 0.03));
+  }
+
+  /**
+   * An orange research lab on stilts, like a container: teal window band,
+   * solar panels and an antenna on the roof, a small wind turbine beside it.
+   */
+  private addResearchLab(b: Batches, chunk: number, x: number, z: number, side: Side, rng: Rng): void {
+    const yaw = this.terrain.pathHeading(-z) + rand(rng, -0.25, 0.25);
+    const c = Math.cos(yaw);
+    const sn = Math.sin(yaw);
+    // Local ox across the track, oz along it (see addHouse).
+    const world = (ox: number, oz: number): [number, number] => [x + ox * c + oz * sn, z - ox * sn + oz * c];
+    const len = 4.4;
+    const dep = 2.5;
+    let lo = Infinity;
+    for (const [ox, oz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
+      const [wx, wz] = world((ox * dep) / 2, (oz * len) / 2);
+      lo = Math.min(lo, this.terrain.groundHeight(wx, wz));
+    }
+    const legH = 1.3;
+    const orange = this.pickColor(RESEARCH_ORANGE, rng, 0.03).clone();
+    for (const [ox, oz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
+      const [lx, lz] = world(ox * (dep / 2 - 0.3), oz * (len / 2 - 0.45));
+      const gy = this.terrain.groundHeight(lx, lz) - 0.1;
+      this.place(b.box, lx, gy, lz, 0.5, 0.12, 0.6, yaw, RESEARCH_BLACK);
+      this.place(b.box, lx, gy, lz, 0.2, lo + legH - gy + 0.1, 0.2, yaw, RESEARCH_GREY);
+      this.place(b.cone, lx, gy + 0.1, lz, 0.22, 0.45, 0.22, yaw, RESEARCH_BLACK);
+    }
+    const y0 = lo + legH;
+    this.place(b.box, x, y0, z, dep - 0.2, 0.3, len - 0.3, yaw, RESEARCH_NAVY);
+    this.place(b.box, x, y0 + 0.3, z, dep, 1.9, len, yaw, orange);
+    this.place(b.box, x, y0 + 2.2, z, dep + 0.12, 0.14, len + 0.12, yaw, this.col.copy(orange).multiplyScalar(1.08));
+    // White frame and teal window band on the side facing the track, a white door on the end.
+    const face = -side * (dep / 2 + 0.01);
+    const [fx, fz] = world(face, 0.4);
+    this.place(b.box, fx, y0 + 0.75, fz, 0.06, 1.0, 2.2, yaw, RESEARCH_WHITE);
+    this.place(b.box, fx - side * 0.02 * c, y0 + 0.88, fz + side * 0.02 * sn, 0.06, 0.72, 1.9, yaw, RESEARCH_GLASS);
+    const [sx, sz] = world(face, -1.5);
+    this.place(b.box, sx, y0 + 0.5, sz, 0.06, 1.25, 0.65, yaw, RESEARCH_TEAL);
+    const [ex, ez] = world(0, len / 2 + 0.01);
+    this.place(b.box, ex, y0 + 0.4, ez, 0.9, 1.5, 0.06, yaw, RESEARCH_WHITE);
+    // Solar panels and an antenna on the roof.
+    for (const t of [-0.6, 0.6]) {
+      const [px, pz] = world(side * 0.3, t);
+      this.place(b.box, px, y0 + 2.3, pz, 0.08, 0.35, 0.08, yaw, RESEARCH_GREY);
+      this.place(b.box, px, y0 + 2.6, pz, 1.0, 0.05, 0.75, yaw, SOLAR, 0, -side * 0.5);
+    }
+    const [ax, az] = world(side * 0.9, -len / 2 + 0.3);
+    this.place(b.box, ax, y0 + 2.3, az, 0.05, 2.4, 0.05, yaw, RESEARCH_BLACK);
+    // Wind turbine on a pole beside the lab.
+    const [tx, tz] = world(side * (dep / 2 + 1.0), -len / 2 - 0.6);
+    const ty = this.terrain.groundHeight(tx, tz) - 0.1;
+    const poleH = 5.2;
+    this.place(b.box, tx, ty, tz, 0.09, poleH, 0.09, yaw, RESEARCH_GREY);
+    this.place(b.box, tx, ty + poleH - 0.1, tz, 0.16, 0.16, 0.4, yaw, RESEARCH_BLACK);
+    const turn = rng() * Math.PI;
+    for (let k = 0; k < 3; k++) {
+      const [hx, hz] = world(0, 0.2);
+      this.place(b.box, hx - x + tx, ty + poleH - 0.02, hz - z + tz, 0.12, 1.1, 0.03, yaw, RESEARCH_BLACK, 0, turn + (k * Math.PI * 2) / 3);
+    }
+    for (const t of [-1.1, 1.1]) {
+      const [cx2, cz2] = world(0, t);
+      this.colliders.add(chunk, { kind: 'cylinder', x: cx2, z: cz2, r: 1.35, yTop: y0 + 2.3, surface: SURFACES.post, blocksPlayer: true });
+    }
+    this.colliders.add(chunk, { kind: 'cylinder', x: tx, z: tz, r: 0.12, yTop: ty + poleH, surface: SURFACES.post, blocksPlayer: true });
+  }
+
+  /** An orange snowcat: black tracks, a cab with teal glass, a plough in front and a small crane. */
+  private addSnowcat(b: Batches, chunk: number, x: number, z: number, rng: Rng): void {
+    const yaw = rng() * Math.PI * 2;
+    const c = Math.cos(yaw);
+    const sn = Math.sin(yaw);
+    const world = (ox: number, oz: number): [number, number] => [x + ox * c + oz * sn, z - ox * sn + oz * c];
+    const y = this.terrain.groundHeight(x, z) - 0.08;
+    const orange = this.pickColor(RESEARCH_ORANGE, rng, 0.03).clone();
+    for (const sd of [-1, 1]) {
+      const [tx, tz] = world(sd * 0.85, 0);
+      this.place(b.box, tx, y, tz, 0.6, 0.72, 4.0, yaw, RESEARCH_BLACK);
+      const [wx, wz] = world(sd * 1.16, 0);
+      this.place(b.box, wx, y + 0.18, wz, 0.04, 0.34, 3.4, yaw, RESEARCH_GREY);
+    }
+    const [bx, bz] = world(0, -0.35);
+    this.place(b.box, bx, y + 0.65, bz, 2.0, 0.85, 3.1, yaw, orange);
+    this.place(b.box, bx, y + 0.95, bz, 2.03, 0.12, 3.12, yaw, RESEARCH_WHITE);
+    // Cab with glass all round.
+    const [kx, kz] = world(0, 0.75);
+    this.place(b.box, kx, y + 1.5, kz, 1.9, 0.35, 1.4, yaw, orange);
+    this.place(b.box, kx, y + 1.85, kz, 1.86, 0.62, 1.36, yaw, RESEARCH_GLASS);
+    this.place(b.box, kx, y + 2.47, kz, 1.98, 0.14, 1.48, yaw, orange);
+    const [lx, lz] = world(0, 1.3);
+    this.place(b.box, lx, y + 2.61, lz, 1.2, 0.12, 0.14, yaw, RESEARCH_WHITE);
+    // Plough with a teal edge.
+    const [px, pz] = world(0, 2.35);
+    this.place(b.box, px, y - 0.02, pz, 2.7, 0.75, 0.14, yaw, RESEARCH_BLACK, -0.25);
+    this.place(b.box, px, y + 0.68, pz, 2.72, 0.12, 0.16, yaw, RESEARCH_TEAL, -0.25);
+    // Crane arm behind the cab.
+    const [cx2, cz2] = world(0.4, -0.9);
+    this.place(b.box, cx2, y + 1.05, cz2, 0.16, 1.7, 0.16, yaw, RESEARCH_TEAL, 0.5);
+    for (const t of [-1, 1]) {
+      const [ox, oz] = world(0, t * 1.0);
+      this.colliders.add(chunk, { kind: 'cylinder', x: ox, z: oz, r: 1.25, yTop: y + 2.6, surface: SURFACES.post, blocksPlayer: true });
+    }
+  }
+
+  /** True when (x, z) is land a little above the Antarctic sea and not too steep. */
+  private onLand(x: number, z: number, margin = 0.3): boolean {
+    return this.terrain.groundHeight(x, z) > this.terrain.seaLevel(-z) + margin;
+  }
+
   // ---------------------------------------------------------------------------
 
   /** Build all decoration for chunk i. Also registers the colliders. */
@@ -867,6 +1078,19 @@ export class Decor {
       let groveDone = false;
       if (this.fenceOn(i, side)) this.addFence(b, i, i, side);
       if (landscapeAt(p0) === 'greece' || landscapeAt(p1) === 'greece') this.addDryWall(b, i, i, side);
+      // Now and then an orange research lab or snowcat in Antarctica.
+      const pm = (p0 + p1) / 2;
+      if (landscapeAt(pm) === 'antarctic' && hash3(i, side, this.terrain.seed + 97) < 0.17) {
+        const rrng = mulberry32(subSeed(this.terrain.seed, 2100 + i, side + 2));
+        const rp = rand(rrng, p0 + 6, p1 - 6);
+        const rd = rand(rrng, 8, 16);
+        const rx = this.terrain.pathCenterX(rp) + side * rd;
+        if (this.onLand(rx, -rp, 0.5) && this.onLand(rx + side * 3, -rp, 0.5)) {
+          if (rrng() < 0.55) this.addResearchLab(b, i, rx, -rp, side, rrng);
+          else this.addSnowcat(b, i, rx, -rp, rrng);
+          placed.push([rx, -rp, 4.5]);
+        }
+      }
       // One farmhouse per farmstead segment, in the chunk that holds its spot.
       const seg = Math.floor(p0 / 100);
       for (let k = seg; k <= seg + 1; k++) {
@@ -1048,6 +1272,45 @@ export class Decor {
             } else if (r < 0.12 && d > 2.4 && !tooClose(x, z, 1.2)) {
               const bx = this.addBush(b, i, x, z, rng, rand(rng, 0.4, 0.8), CANOPY_COLORS.oleander);
               placed.push([bx, z, 0.6]);
+            }
+            break;
+          }
+          case 'snowfield': {
+            const r = rng();
+            if (r < 0.006 && d > 2.4 && !tooClose(x, z, 2)) {
+              this.addPenguinGroup(b, i, x, z, 1 + Math.floor(rng() * 3), 1.2, rng, true);
+              placed.push([x, z, 1.5]);
+            } else if (r < 0.018 && d > 4 && !tooClose(x, z, 1.5) && this.onLand(x, z)) {
+              this.addSnowyRock(b, i, x, z, rng, d < 8 ? 0.6 : 1.2);
+              placed.push([x, z, 1]);
+            }
+            break;
+          }
+          case 'shore': {
+            const r = rng();
+            if (!this.onLand(x, z, 0.05)) {
+              if (r < 0.03) this.addIceberg(b, x, z, rng);
+            } else if (r < 0.01 && d > 2.4 && !tooClose(x, z, 2)) {
+              this.addPenguinGroup(b, i, x, z, 2 + Math.floor(rng() * 4), 1.6, rng, true);
+              placed.push([x, z, 2]);
+            } else if (r < 0.05 && d > 3 && !tooClose(x, z, 1.4)) {
+              this.addSnowyRock(b, i, x, z, rng, 0.9);
+              placed.push([x, z, 1]);
+            }
+            break;
+          }
+          case 'rookery': {
+            // A colony of penguins on dark rock.
+            const r = rng();
+            if (r < 0.012 && d > 4 && !tooClose(x, z, 3) && this.onLand(x, z)) {
+              this.addPenguinGroup(b, i, x, z, 8 + Math.floor(rng() * 14), rand(rng, 2.5, 4.5), rng, true);
+              placed.push([x, z, 4]);
+            } else if (r < 0.02 && d > 2.2 && !tooClose(x, z, 1.5)) {
+              this.addPenguinGroup(b, i, x, z, 1 + Math.floor(rng() * 2), 0.8, rng, true);
+              placed.push([x, z, 1]);
+            } else if (r < 0.06 && d > 3 && !tooClose(x, z, 1.2) && this.onLand(x, z)) {
+              this.addSnowyRock(b, i, x, z, rng, 0.8);
+              placed.push([x, z, 0.8]);
             }
             break;
           }

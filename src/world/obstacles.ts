@@ -3,7 +3,7 @@ import { CamelFactory, type Camel } from '../entities/camel';
 import { GnomeFactory, type Gnome } from '../entities/gnome';
 import { lerp, smoothstep } from '../utils/math';
 import { mulberry32, rand, subSeed, type Rng } from '../utils/noise';
-import { ColliderStore, SURFACES } from './colliders';
+import { ColliderStore, SURFACES, type Surface } from './colliders';
 import { LANDSCAPE_LENGTH, landscapeAt } from './landscape';
 import { GORGE, Terrain, type Gorge } from './terrain';
 
@@ -12,10 +12,13 @@ export type ObstacleKind =
   // Greece
   | 'wall' | 'rock' | 'scree' | 'sand'
   // Desert
-  | 'camel' | 'blocks' | 'column' | 'basalt' | 'drift';
+  | 'camel' | 'blocks' | 'column' | 'basalt' | 'drift'
+  // Antarctica
+  | 'ice' | 'ridge' | 'snowdrift' | 'icepatch' | 'pebbles';
 
 const WALL_COLORS = [0xbdb4a2, 0xa99f8c, 0xcfc6b2, 0x9a907e, 0xb5a088].map((h) => new THREE.Color(h));
 const SANDSTONE_COLORS = [0xd8b47a, 0xcda66a, 0xe0c08a, 0xc89c62].map((h) => new THREE.Color(h));
+const ICE_COLORS = [0xd8ecf8, 0xc4e2f4, 0xe6f2fa, 0xb4d8ee].map((h) => new THREE.Color(h));
 
 /**
  * Obstacles lie across the track and get denser and bigger with distance.
@@ -48,6 +51,12 @@ export class Obstacles {
   private readonly steelMat = new THREE.MeshLambertMaterial({ color: 0x8b979d, flatShading: true });
   private readonly plankMat = new THREE.MeshLambertMaterial({ color: 0x8d6f4e, flatShading: true });
   private readonly plankDarkMat = new THREE.MeshLambertMaterial({ color: 0x775c40, flatShading: true });
+  // Antarctica: blocks of ice, wind-packed snow ridges, glassy ice.
+  private readonly iceMat = new THREE.MeshPhongMaterial({ color: 0xffffff, emissive: 0x1a3448, specular: 0xcfe8ff, shininess: 70, flatShading: true });
+  private readonly snowMat = new THREE.MeshLambertMaterial({ color: 0xf2f6fa, flatShading: true });
+  private readonly driftSnowMat = new THREE.MeshLambertMaterial({ color: 0xf6f9fc });
+  private readonly glazeMat = new THREE.MeshPhongMaterial({ color: 0xa9cfe8, specular: 0xffffff, shininess: 120, transparent: true, opacity: 0.85 });
+  private readonly darkStoneMat = new THREE.MeshLambertMaterial({ color: 0x3e3530, flatShading: true });
   private readonly camelFactory = new CamelFactory();
   /** Camels per chunk; the game animates them. */
   readonly camels = new Map<number, Camel[]>();
@@ -63,7 +72,7 @@ export class Obstacles {
   ) {}
 
   dispose(): void {
-    for (const m of [this.rootMat, this.branchMat, this.logMat, this.logEndMat, this.stoneMat, this.puddleMat, this.limeMat, this.wallMat, this.sandMat, this.sandstoneMat, this.basaltMat, this.driftMat, this.steelMat, this.plankMat, this.plankDarkMat]) m.dispose();
+    for (const m of [this.rootMat, this.branchMat, this.logMat, this.logEndMat, this.stoneMat, this.puddleMat, this.limeMat, this.wallMat, this.sandMat, this.sandstoneMat, this.basaltMat, this.driftMat, this.steelMat, this.plankMat, this.plankDarkMat, this.iceMat, this.snowMat, this.driftSnowMat, this.glazeMat, this.darkStoneMat]) m.dispose();
     this.camelFactory.dispose();
     this.camels.clear();
     this.gnomeFactory.dispose();
@@ -81,7 +90,13 @@ export class Obstacles {
 
   private pickKind(p: number, rng: Rng): ObstacleKind {
     const land = landscapeAt(p);
-    const weights: Array<[ObstacleKind, number]> = land === 'desert' ? [
+    const weights: Array<[ObstacleKind, number]> = land === 'antarctic' ? [
+      ['ice', 1.0],
+      ['ridge', 1.0],
+      ['snowdrift', 0.7],
+      ['icepatch', 0.6],
+      ['pebbles', 0.6],
+    ] : land === 'desert' ? [
       ['blocks', 0.9],
       ['column', 0.9],
       ['basalt', 0.9],
@@ -138,6 +153,7 @@ export class Obstacles {
       if (kind === 'log' && this.terrain.pathSlope(p) < -0.08) kind = 'root';
       if (kind === 'wall' && this.terrain.pathSlope(p) < -0.08) kind = 'scree';
       if ((kind === 'blocks' || kind === 'column') && this.terrain.pathSlope(p) < -0.08) kind = 'basalt';
+      if (kind === 'ice' && this.terrain.pathSlope(p) < -0.08) kind = 'pebbles';
       // At most one camel per chunk.
       if (kind === 'camel' && camelPlaced) kind = 'drift';
       if (kind === 'camel') camelPlaced = true;
@@ -160,6 +176,12 @@ export class Obstacles {
         case 'column': this.addFallenColumn(group, i, p, rng); break;
         case 'basalt': this.addScree(group, i, p, rng, this.basaltMat); break;
         case 'drift': this.addPuddle(group, i, p, rng, this.driftMat, 5); break;
+        case 'ice': this.addBlocks(group, i, p, rng, ICE_COLORS, this.iceMat); break;
+        case 'ridge': this.addSnowRidge(group, i, p, rng); break;
+        case 'snowdrift': this.addPuddle(group, i, p, rng, this.driftSnowMat, 5); break;
+        // Glassy ice: the apple slides on further than on the packed snow.
+        case 'icepatch': this.addPuddle(group, i, p, rng, this.glazeMat, -0.5); break;
+        case 'pebbles': this.addScree(group, i, p, rng, this.darkStoneMat); break;
       }
     }
     return group;
@@ -178,6 +200,7 @@ export class Obstacles {
     sink: number, // fraction of the radius buried in the ground
     material: THREE.Material,
     wobble: number,
+    surface: Surface = SURFACES.wood,
   ): THREE.Vector3[] {
     const cx = this.terrain.pathCenterX(p);
     const heading = this.terrain.pathHeading(p);
@@ -211,7 +234,7 @@ export class Obstacles {
         ax: a.x, ay: a.y, az: a.z,
         bx: b.x, by: b.y, bz: b.z,
         r: radius * 0.95,
-        surface: SURFACES.wood,
+        surface,
         blocksPlayer: false,
       });
     }
@@ -522,8 +545,8 @@ export class Obstacles {
     list.push(gnome);
   }
 
-  /** Two or three cut sandstone blocks in a row across the track: chip the apple over them. */
-  private addBlocks(group: THREE.Group, chunk: number, p: number, rng: Rng): void {
+  /** Two or three cut sandstone blocks (or blocks of ice) in a row across the track: chip the apple over them. */
+  private addBlocks(group: THREE.Group, chunk: number, p: number, rng: Rng, colors = SANDSTONE_COLORS, material: THREE.Material = this.wallMat): void {
     const cx = this.terrain.pathCenterX(p);
     const angle = this.terrain.pathHeading(p) + rand(rng, -0.3, 0.3);
     const dirX = Math.cos(angle);
@@ -532,7 +555,7 @@ export class Obstacles {
     const bw = rand(rng, 0.85, 1.05);
     const h = rand(rng, 0.3, 0.42) + 0.1 * smoothstep(0, 600, Obstacles.local(p));
     const d0 = rand(rng, -0.4, 0.4) - ((count - 1) * bw) / 2;
-    const mesh = new THREE.InstancedMesh(this.wallStoneGeo, this.wallMat, count);
+    const mesh = new THREE.InstancedMesh(this.wallStoneGeo, material, count);
     const m = new THREE.Matrix4();
     const q = new THREE.Quaternion();
     const e = new THREE.Euler();
@@ -547,7 +570,7 @@ export class Obstacles {
       q.setFromEuler(e);
       m.compose(new THREE.Vector3(x, y, z), q, new THREE.Vector3(bw * 0.96, h * rand(rng, 0.9, 1.1), rand(rng, 0.5, 0.65)));
       mesh.setMatrixAt(k, m);
-      mesh.setColorAt(k, SANDSTONE_COLORS[Math.floor(rng() * SANDSTONE_COLORS.length)]);
+      mesh.setColorAt(k, colors[Math.floor(rng() * colors.length)]);
     }
     mesh.castShadow = true;
     mesh.receiveShadow = true;
@@ -559,8 +582,17 @@ export class Obstacles {
       kind: 'capsule',
       ax: a[0] - dirX * bw * 0.4, ay: a[1], az: a[2] - dirZ * bw * 0.4,
       bx: b[0] + dirX * bw * 0.4, by: b[1], bz: b[2] + dirZ * bw * 0.4,
-      r, surface: SURFACES.stone, blocksPlayer: false,
+      r, surface: material === this.iceMat ? SURFACES.ice : SURFACES.stone, blocksPlayer: false,
     });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Antarctica
+
+  /** A ridge of wind-packed snow across the track: it soaks up the apple's bounce. */
+  private addSnowRidge(group: THREE.Group, chunk: number, p: number, rng: Rng): void {
+    const radius = rand(rng, 0.13, 0.18) + 0.07 * smoothstep(0, 600, Obstacles.local(p));
+    this.addTubeAcross(group, chunk, p, rng, radius, rand(rng, 1.5, 2.4), 0.4, this.snowMat, 0.1, SURFACES.snow);
   }
 
   /** A fallen sandstone column across the track, broken into drums. */
