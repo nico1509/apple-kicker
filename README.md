@@ -1,6 +1,6 @@
-# Apple Kicker
-
 <p align="center"><img src="docs/logo.png" alt="Apple Kicker Logo" width="480"></p>
+
+# Apple Kicker
 
 Ein kleines 3D-Browserspiel: Du stehst auf einem prozedural generierten Feldweg
 im goldenen Oktober und kickst deinen Apfel so weit wie möglich den Weg entlang –
