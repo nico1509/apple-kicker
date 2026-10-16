@@ -1,5 +1,7 @@
 # Apple Kicker
 
+<p align="center"><img src="docs/logo.png" alt="Apple Kicker Logo" width="480"></p>
+
 Ein kleines 3D-Browserspiel: Du stehst auf einem prozedural generierten Feldweg
 im goldenen Oktober und kickst deinen Apfel so weit wie möglich den Weg entlang –
 während dich von hinten eine Gewitterfront einholt.
@@ -83,3 +85,9 @@ Der Produktions-Build in `dist/` ist rein statisch und läuft von jedem Webserve
 Die Optik orientiert sich an deutschen Feldwegen im Oktober: Fahrspuren mit
 Grasstreifen, Hecken und Streuobstwiesen, frisch gepflügte Äcker, Weinberge am Hang
 und bewaldete Hügel am Horizont unter Schleierwolken.
+
+### Logo
+
+Das Logo nutzt die Schrift [Luckiest Guy](https://fonts.google.com/specimen/Luckiest+Guy)
+von Astigmatic (Apache License 2.0), lokal eingebunden unter `public/fonts/`.
+Der Apfel aus dem Logo ist zugleich das Favicon (`public/favicon.svg`).

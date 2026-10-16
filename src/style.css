@@ -1,3 +1,9 @@
+@font-face {
+  font-family: 'Luckiest Guy';
+  src: url('/fonts/luckiest-guy.woff2') format('woff2');
+  font-display: swap;
+}
+
 :root {
   --panel: rgba(20, 24, 18, 0.55);
   --text: #f6f1e4;
@@ -347,8 +353,47 @@ body {
   text-shadow: 0 3px 0 #8f4a1f, 0 8px 24px rgba(0, 0, 0, 0.6);
 }
 
-.overlay h1 span {
-  color: #ff6b4a;
+/* Logo: apple on the left, APPLE / KICKER stacked in a bold comic face. */
+.overlay h1.logo {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: clamp(10px, 2.5vw, 20px);
+  margin: 0 0 14px;
+  font-family: 'Luckiest Guy', var(--font);
+  font-weight: 400;
+  font-size: clamp(42px, 10vw, 72px);
+  letter-spacing: 0.03em;
+  line-height: 0.92;
+  text-shadow: none;
+}
+
+.logo-apple {
+  width: 1.9em;
+  height: auto;
+  flex: none;
+  filter: drop-shadow(0 0 2px #ffd9a3) drop-shadow(0 6px 10px rgba(0, 0, 0, 0.45));
+}
+
+.logo-words {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  transform: rotate(-4deg);
+}
+
+.logo-words > span {
+  -webkit-text-stroke: 0.12em #1c2028;
+  paint-order: stroke fill;
+  text-shadow: 0.05em 0.06em 0 #1c2028, 0 0 0.12em rgba(255, 217, 163, 0.35);
+}
+
+.logo-apple-word {
+  color: #e04a3a;
+}
+
+.logo-kicker-word {
+  color: #9bd36a;
 }
 
 .overlay h2 {
