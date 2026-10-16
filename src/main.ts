@@ -6,6 +6,9 @@ declare global {
     __appleKicker?: {
       game: Game;
       start: () => void;
+      restart: () => void;
+      kickstart: () => void;
+      setDifficulty: (d: 'easy' | 'hard') => void;
       kick: (dx: number, dy: number, foot: 'left' | 'right', chip?: boolean) => void;
       simulate: (seconds: number, keys?: string[]) => void;
       look: (yaw: number, pitch: number) => void;
@@ -27,8 +30,12 @@ function boot(): void {
       start: () => {
         if (game.state === 'menu') game.start();
         else if (game.state === 'paused') game.resume();
+        else if (game.state === 'lifelost') game.continueRun();
         else if (game.state === 'over') game.restart();
       },
+      restart: () => game.restart(),
+      kickstart: () => game.kickstart(),
+      setDifficulty: (d) => game.setDifficulty(d),
       kick: (dx, dy, foot, chip = false) => game.debugKick(dx, dy, foot, chip),
       simulate: (seconds, keys = []) => game.simulate(seconds, keys),
       look: (yaw, pitch) => game.debugLook(yaw, pitch),

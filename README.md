@@ -39,6 +39,7 @@ Auf schwachen Rechnern `?quality=low` oder `?quality=medium` an die Adresse hän
 | `Q` / `E` | Stupser mit dem linken / rechten Fuß |
 | `M` | Ton an/aus |
 | `P` / `Esc` | Pause (im Pausenmenü: `R` = Neustart) |
+| `Enter` / `R` | nach einem verlorenen Leben: weitermachen / neu starten |
 
 Die **Zugrichtung** bestimmt die Schussrichtung (nach oben ziehen = geradeaus),
 die **Zuglänge** die Kraft. Der Apfel muss dicht vor dem jeweiligen Fuß liegen –
@@ -49,14 +50,20 @@ dem Apfel außerdem einen leichten Drall nach innen (linker Fuß: nach rechts, r
 
 * Gezählt werden die Meter, die der **Apfel** entlang des Weges zurücklegt.
 * Hinter dir zieht eine Schlechtwetterfront mit Regen und Gewitter heran. Sie wird
-  mit der Zeit schneller. Holt sie **dich oder deinen Apfel** ein, ist der Lauf vorbei.
+  mit der Zeit schneller. Holt sie **dich oder deinen Apfel** ein, kostet das ein Leben.
+* Im Startmenü wählst du die Schwierigkeit:
+  * **Schwer**: ein Leben – eingeholt ist der Lauf vorbei.
+  * **Einfach**: drei Leben (oben als Äpfel angezeigt). Nach dem Einholen kannst du
+    **weitermachen** – Spieler, Apfel und Gewitter stehen dann wie beim Start auf dem Weg,
+    aber bei der Weite, die du schon geschafft hast – oder mit allen Leben **neu starten**.
+    Mit **Kickstart** beginnt ein neuer Lauf direkt bei deinem Einfach-Rekord.
 * Ist der Apfel mindestens 5 m von dir entfernt, wird er immer markiert, auch wenn
   er im Bild ist.
 * Mit der Strecke tauchen immer mehr Hindernisse auf: Wurzeln, Äste, Steine,
   Pfützen, umgestürzte Stämme und Hügel. Kick fester, lupf drüber oder such dir
   einen Weg drum herum.
 * Auf den Fahrspuren rollt der Apfel am besten, auf Wiese und Acker bremst er schneller.
-* Der Rekord wird im Browser (localStorage) gespeichert.
+* Der Rekord wird für jede Schwierigkeit getrennt im Browser (localStorage) gespeichert.
 
 ## Technik
 
