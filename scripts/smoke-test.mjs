@@ -94,6 +94,22 @@ const shot = (name) => page.screenshot({ path: path.join(shots, name) });
 
 const wrap = (a) => ((a + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
 
+/** If a gnome has run off with the apple, catch it and kick it over. */
+async function freeApple() {
+  for (let i = 0; i < 80; i++) {
+    const s = await state();
+    if (!s.appleHeld) return;
+    await page.evaluate(() => window.__appleKicker.game.debugThirst(1));
+    const dx = s.holderX - s.playerX;
+    const dz = s.holderZ - s.playerZ;
+    await look(Math.atan2(-dx, -dz), -0.4);
+    if (Math.hypot(dx, dz) < 1.4) {
+      await kick(0, -200, 'right');
+      await simulate(0.35);
+    } else await simulate(0.1, ['KeyW']);
+  }
+}
+
 /**
  * Turn towards the apple, walk up to it and kick it along the track
  * (aimYaw = 0 is straight down the lane). Returns the states around the kick.
@@ -106,6 +122,8 @@ async function walkAndKick(foot, powerPx, aimYaw = 0, chip = false, shotName = n
     if ((await state()).appleResting) break;
     await simulate(0.5);
   }
+  // A gnome may have grabbed it on the way.
+  await freeApple();
   const s = await state();
   const ddx = s.applePx - s.playerX;
   const ddz = s.applePz - s.playerZ;
@@ -509,6 +527,166 @@ try {
   const x2 = await state();
   check(x1.stamina > 0.55 && x1.stamina < 0.85, `catching the breath refills the stamina (${x1.stamina.toFixed(2)})`);
   check(x2.exhausted === 0 && x2.stamina > 0.95 && x2.playerZ < x1.playerZ - 0.6, `after a second the player walks again (${(x1.playerZ - x2.playerZ).toFixed(2)} m)`);
+
+  // Greek gorge: a steel bridge whose railing is open low down. The player
+  // cannot fall in; an apple that drops into the gorge costs a life.
+  const gorges = await page.evaluate(() => window.__appleKicker.game.debugGorges(9));
+  const perSection = {};
+  for (const g of gorges) {
+    const k = Math.floor(g.p / 1000);
+    perSection[k] = (perSection[k] ?? 0) + 1;
+  }
+  check(gorges.length > 0 && Object.keys(perSection).every((k) => k % 3 === 1 && perSection[k] <= 2), `gorges only in Greece, at most two per section (${JSON.stringify(perSection)})`);
+  const gz = gorges[0];
+  const onBridge = (g, x, p, yaw = 0) =>
+    page.evaluate(([g, x, p, yaw]) => {
+      const k = window.__appleKicker.game;
+      k.debugThirst(1);
+      k.storm.progress = g.p - 200;
+      k.player.reset(x, -p, yaw);
+    }, [g, x, p, yaw]);
+  await page.evaluate((g) => {
+    const k = window.__appleKicker.game;
+    k.debugTeleport(g.p - 32);
+    k.storm.progress = g.p - 200;
+    k.debugLook(0, -0.12);
+  }, gz);
+  await simulate(0.1);
+  await shot('15-gorge-bridge.png');
+  await onBridge(gz, gz.x, gz.p, -Math.PI / 2);
+  await page.evaluate((g) => window.__appleKicker.game.debugApple(g.x, -(g.p + 22)), gz);
+  await simulate(0.05);
+  const gb0 = await state();
+  check(Math.abs(gb0.playerY - gz.h - 0.06) < 0.02, `the bridge deck carries the player (${(gb0.playerY - gz.h).toFixed(3)} m above the track height)`);
+  await simulate(1.5, ['KeyW']);
+  const gb1 = await state();
+  await onBridge(gz, gz.x, gz.p, Math.PI / 2);
+  await simulate(1.5, ['KeyW']);
+  const gb2 = await state();
+  check(gb1.playerX - gz.x < 1.25 && gz.x - gb2.playerX < 1.25 && gb1.playerY > gz.h - 0.1 && gb2.playerY > gz.h - 0.1, `invisible walls keep the player on the deck (${(gb1.playerX - gz.x).toFixed(2)} / ${(gb2.playerX - gz.x).toFixed(2)} m)`);
+  await onBridge(gz, gz.x + 8, gz.p - 21, 0);
+  await simulate(3, ['KeyW']);
+  const gb3 = await state();
+  check(-gb3.playerZ < gz.p - 17.3 && gb3.playerY > gz.h - 1.5, `the player cannot walk off the rim into the gorge (stops ${(gz.p + gb3.playerZ).toFixed(2)} m before its centre)`);
+  // An apple rolling along the deck crosses the bridge.
+  await onBridge(gz, gz.x, gz.p - 20, 0);
+  await page.evaluate((g) => {
+    const k = window.__appleKicker.game;
+    k.debugApple(g.x + 0.2, -(g.p - 18));
+    k.apple.vel.set(0, 0, -11);
+    k.apple.resting = false;
+  }, gz);
+  await simulate(5);
+  const gb4 = await state();
+  check(gb4.state === 'playing' && gb4.appleProgress > gz.p + 18, `an apple rolling straight crosses the bridge (${(gb4.appleProgress - gz.p).toFixed(1)} m past the centre)`);
+  // Kicked sideways it falls through the railing into the gorge: a life is lost.
+  const livesBefore = gb4.lives;
+  await onBridge(gz, gz.x - 0.6, gz.p - 1.5, 0);
+  await page.evaluate((g) => {
+    const k = window.__appleKicker.game;
+    k.debugApple(g.x + 0.6, -(g.p - 0.6));
+    k.apple.vel.set(4.5, 0.6, -0.4);
+    k.apple.resting = false;
+    k.debugLook(-0.9, -0.35);
+  }, gz);
+  await simulate(0.32);
+  await shot('16-gorge-apple-falls.png');
+  await simulate(1.5);
+  const gb5 = await state();
+  check(gb5.state === 'lifelost' && gb5.lives === livesBefore - 1, `the apple falling into the gorge costs a life (${gb5.state}, ${livesBefore} → ${gb5.lives})`);
+  check((await page.textContent('.overlay-content')).includes('Schlucht'), 'the panel says the apple fell into the gorge');
+  await shot('17-gorge-lifelost.png');
+  await clickEl('[data-action="continue"]');
+  await simulate(0.2);
+  const gb6 = await state();
+  const respawnP = -gb6.playerZ;
+  check(gb6.state === 'playing' && Math.abs(respawnP - gz.p) > 20 && Math.abs(gb6.playerGroundGap) < 0.02, `the respawn is on firm ground away from the gorge (${(respawnP - gz.p).toFixed(1)} m from its centre)`);
+
+  // Forest gnomes: one that touches the apple runs off with it at half the
+  // walking speed until the player kicks it over.
+  const gnome = await page.evaluate(() => {
+    const k = window.__appleKicker;
+    for (const p of [3300, 3450, 3600, 3750, 3900, 300, 450, 600, 750, 900]) {
+      k.teleport(p);
+      k.game.storm.progress = p - 150;
+      const list = k.game.debugGnomes().filter((q) => q.state === 'walk' && -q.homeZ > p + 8 && -q.homeZ < p + 80);
+      list.sort((a, b) => b.homeZ - a.homeZ);
+      if (list.length) return list[0];
+    }
+    return null;
+  });
+  check(gnome !== null, `gnomes walk on the forest track (${gnome ? (-gnome.homeZ).toFixed(0) + ' m' : 'none'})`);
+  if (gnome) {
+    const findGnome = () => page.evaluate((n) => window.__appleKicker.game.debugGnomes().find((q) => q.id === n.id), gnome);
+    await page.evaluate((n) => {
+      const k = window.__appleKicker.game;
+      k.player.reset(n.x - 0.3, n.homeZ + 2.8, 0);
+      k.debugLook(0, -0.3);
+      k.debugApple(n.homeX + 6, n.homeZ + 8);
+    }, gnome);
+    await simulate(0.05);
+    await shot('18-gnome.png');
+    // A free apple within 20 m draws the gnome off its patrol, wherever the player is;
+    // further away it is left alone.
+    const n00 = await findGnome();
+    await page.evaluate((n) => {
+      const k = window.__appleKicker.game;
+      k.player.reset(n.x, n.z + 40, 0);
+      k.debugApple(n.x, n.z - 24);
+    }, n00);
+    await simulate(1);
+    const nf = await findGnome();
+    check(Math.abs(nf.z - n00.z) < 0.3, `a gnome ignores an apple 24 m away (${(n00.z - nf.z).toFixed(2)} m towards it)`);
+    await page.evaluate((n) => window.__appleKicker.game.debugApple(n.x, n.z - 12), nf);
+    await simulate(1);
+    const nc = await findGnome();
+    check(nf.z - nc.z > 1.5, `a gnome runs after an apple 12 m away, with the player 40 m off (${(nf.z - nc.z).toFixed(2)} m in 1 s)`);
+    const n0 = await findGnome();
+    await page.evaluate((n) => {
+      const k = window.__appleKicker.game;
+      k.player.reset(n.x, n.z + 6, 0);
+      k.debugApple(n.x, n.z + 0.25);
+    }, n0);
+    await simulate(0.1);
+    const gn1 = await state();
+    check(gn1.appleHeld && gn1.gnomeGrabs >= 1, `a gnome grabs the apple it touches (held=${gn1.appleHeld})`);
+    const n1 = await findGnome();
+    await simulate(1);
+    const n2 = await findGnome();
+    const gn2 = await state();
+    const ran = Math.hypot(n2.x - n1.x, n2.z - n1.z);
+    check(n2.state === 'carry' && ran > 1.7 && ran < 2.3, `the gnome runs off with it at half the walking speed (${ran.toFixed(2)} m/s)`);
+    check(Math.hypot(gn2.applePx - n2.x, gn2.applePz - n2.z) < 0.6, 'the apple travels in its hands');
+    await shot('19-gnome-steals.png');
+    // Chase it down and kick it.
+    await freeApple();
+    const gn3 = await state();
+    const n3 = await findGnome();
+    check(!gn3.appleHeld && n3.state === 'down' && gn3.gnomeKnocked >= 1, `kicking the gnome knocks it over and frees the apple (${n3.state}, held=${gn3.appleHeld})`);
+    await simulate(0.8);
+    await look((await state()).playerYaw, -0.55);
+    await simulate(0.05);
+    await shot('20-gnome-down.png');
+    const stars = await page.evaluate((n) => {
+      for (const list of window.__appleKicker.game.world.obstacles.gnomes.values()) {
+        for (const g of list) if (g.id === n.id) return g.stars.visible ? g.stars.children.length : 0;
+      }
+      return -1;
+    }, gnome);
+    check(stars >= 2 && stars <= 3, `the fallen gnome has ${stars} stars over its head`);
+    const gn4 = await state();
+    check(!gn4.appleHeld && gn4.state === 'playing', 'the fallen gnome does not take the apple again');
+    // Stand right behind the freed apple and kick it on (other gnomes nearby lie down for this).
+    await page.evaluate(() => {
+      const k = window.__appleKicker.game;
+      for (const list of k.world.obstacles.gnomes.values()) {
+        for (const g of list) if (Math.abs(g.group.position.z - k.apple.pos.z) < 60) g.state = 'down';
+      }
+      k.player.reset(k.apple.pos.x, k.apple.pos.z + 1.1, 0);
+    });
+    const r4 = await walkAndKick('right', 300, 0);
+    check(r4.after.appleProgress > gn3.appleProgress + 4, `the freed apple can be kicked on (${r4.after.appleProgress.toFixed(1)} m)`);
+  }
 
   // Frame rate estimate (software rendering, so only a rough sanity figure).
   const fps = await page.evaluate(

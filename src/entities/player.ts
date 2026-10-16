@@ -60,6 +60,11 @@ export class Player {
   private inBush = 0;
   /** Displacement still to be applied from a shove (e.g. camel spit), in metres. */
   private shoveX = 0;
+  /**
+   * Asked when a swing reaches its contact point. Returning true means the foot
+   * hit something else (a gnome) and the apple is not kicked.
+   */
+  kickOverride: ((foot: Foot) => boolean) | null = null;
   private shoveZ = 0;
 
   constructor(
@@ -236,6 +241,12 @@ export class Player {
         let t = len2 > 0 ? ((this.pos.x - col.ax) * abx + (this.pos.z - col.az) * abz) / len2 : 0;
         t = clamp(t, 0, 1);
         this.pushOutCircle(col.ax + abx * t, col.az + abz * t, col.r + pr);
+      } else if (col.kind === 'wall') {
+        const abx = col.bx - col.ax;
+        const abz = col.bz - col.az;
+        const len2 = abx * abx + abz * abz;
+        const t = clamp(len2 > 0 ? ((this.pos.x - col.ax) * abx + (this.pos.z - col.az) * abz) / len2 : 0, 0, 1);
+        this.pushOutCircle(col.ax + abx * t, col.az + abz * t, pr);
       }
     });
 
@@ -335,6 +346,7 @@ export class Player {
 
   /** True when the apple is in reach of the given foot. */
   appleInReach(apple: Apple, foot: Foot): boolean {
+    if (apple.held) return false;
     const rel = this.tmp.subVectors(apple.pos, this.pos);
     if (Math.abs(rel.y) > 0.95) return false;
     const fwd = this.forward(this.fwd);
@@ -348,6 +360,7 @@ export class Player {
   }
 
   private executeKick(k: KickState, apple: Apple): void {
+    if (this.kickOverride?.(k.foot)) return;
     if (!this.appleInReach(apple, k.foot)) {
       this.events.onWhiff(k.foot);
       return;
@@ -380,7 +393,7 @@ export class Player {
     const dz = apple.pos.z - this.pos.z;
     const d = Math.hypot(dx, dz);
     const minD = CFG.player.radius + apple.radius;
-    if (d >= minD || apple.pos.y > this.pos.y + 1.0) return;
+    if (d >= minD || apple.pos.y > this.pos.y + 1.0 || apple.held) return;
     // Right after a kick the apple is in flight: hands off.
     if (apple.sinceKick < 0.3 || !apple.onGround) return;
     let nx = d > 1e-4 ? dx / d : -Math.sin(this.yaw);

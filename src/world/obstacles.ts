@@ -1,13 +1,14 @@
 import * as THREE from 'three';
 import { CamelFactory, type Camel } from '../entities/camel';
+import { GnomeFactory, type Gnome } from '../entities/gnome';
 import { lerp, smoothstep } from '../utils/math';
 import { mulberry32, rand, subSeed, type Rng } from '../utils/noise';
 import { ColliderStore, SURFACES } from './colliders';
 import { LANDSCAPE_LENGTH, landscapeAt } from './landscape';
-import { Terrain } from './terrain';
+import { GORGE, Terrain, type Gorge } from './terrain';
 
 export type ObstacleKind =
-  | 'root' | 'branch' | 'log' | 'stone' | 'puddle'
+  | 'root' | 'branch' | 'log' | 'stone' | 'puddle' | 'gnome'
   // Greece
   | 'wall' | 'rock' | 'scree' | 'sand'
   // Desert
@@ -43,9 +44,16 @@ export class Obstacles {
   private readonly sandstoneMat = new THREE.MeshLambertMaterial({ color: 0xd6b078, flatShading: true });
   private readonly basaltMat = new THREE.MeshLambertMaterial({ color: 0x433830, flatShading: true });
   private readonly driftMat = new THREE.MeshLambertMaterial({ color: 0xe6c690 });
+  // Gorge bridge: weathered planks on a grey steel truss.
+  private readonly steelMat = new THREE.MeshLambertMaterial({ color: 0x8b979d, flatShading: true });
+  private readonly plankMat = new THREE.MeshLambertMaterial({ color: 0x8d6f4e, flatShading: true });
+  private readonly plankDarkMat = new THREE.MeshLambertMaterial({ color: 0x775c40, flatShading: true });
   private readonly camelFactory = new CamelFactory();
   /** Camels per chunk; the game animates them. */
   readonly camels = new Map<number, Camel[]>();
+  private readonly gnomeFactory = new GnomeFactory();
+  /** Gnomes per chunk; the game moves them. */
+  readonly gnomes = new Map<number, Gnome[]>();
   private readonly stoneGeo = new THREE.IcosahedronGeometry(1, 0);
   private readonly stubGeo = new THREE.CylinderGeometry(0.5, 1, 1, 5).translate(0, 0.5, 0);
 
@@ -55,9 +63,11 @@ export class Obstacles {
   ) {}
 
   dispose(): void {
-    for (const m of [this.rootMat, this.branchMat, this.logMat, this.logEndMat, this.stoneMat, this.puddleMat, this.limeMat, this.wallMat, this.sandMat, this.sandstoneMat, this.basaltMat, this.driftMat]) m.dispose();
+    for (const m of [this.rootMat, this.branchMat, this.logMat, this.logEndMat, this.stoneMat, this.puddleMat, this.limeMat, this.wallMat, this.sandMat, this.sandstoneMat, this.basaltMat, this.driftMat, this.steelMat, this.plankMat, this.plankDarkMat]) m.dispose();
     this.camelFactory.dispose();
     this.camels.clear();
+    this.gnomeFactory.dispose();
+    this.gnomes.clear();
     this.stoneGeo.dispose();
     this.wallStoneGeo.dispose();
     this.stubGeo.dispose();
@@ -89,6 +99,7 @@ export class Obstacles {
       ['stone', p > 80 ? 0.55 : 0],
       ['log', 1.3 * smoothstep(120, 420, p)],
       ['puddle', p > 150 ? 0.6 : 0],
+      ['gnome', p > 90 ? 0.4 : 0],
     ];
     let total = 0;
     for (const [, w] of weights) total += w;
@@ -105,16 +116,22 @@ export class Obstacles {
     group.name = `obstacles-${i}`;
     const { p0, p1 } = Terrain.chunkRange(i);
     const rng = mulberry32(subSeed(this.terrain.seed, 800 + i));
+    // A bridge belongs to the chunk that holds the centre line of its gorge.
+    for (let k = Math.floor(p0 / LANDSCAPE_LENGTH); k <= Math.floor(p1 / LANDSCAPE_LENGTH); k++) {
+      for (const g of this.terrain.gorgesIn(k)) if (g.p >= p0 && g.p < p1) this.addBridge(group, i, g);
+    }
     const density = Obstacles.density((p0 + p1) / 2);
     const expected = density * (p1 - p0);
     const n = Math.floor(expected + rng());
     if (n === 0) return group;
     const slot = (p1 - p0) / n;
     let camelPlaced = false;
+    let gnomePlaced = false;
     for (let k = 0; k < n; k++) {
       const p = p0 + slot * (k + 0.15 + rng() * 0.7);
-      // Keep obstacles off very steep bits of track.
+      // Keep obstacles off very steep bits of track, and off the bridges and their approaches.
       if (Math.abs(this.terrain.pathSlope(p)) > 0.3) continue;
+      if (this.terrain.gorgeNear(p, GORGE.deckHalfLen + 8)) continue;
       let kind = this.pickKind(p, rng);
       // A log at the foot of a descent traps the apple (it rolls back into the
       // log and cannot be chipped over from contact): use a root there.
@@ -124,6 +141,9 @@ export class Obstacles {
       // At most one camel per chunk.
       if (kind === 'camel' && camelPlaced) kind = 'drift';
       if (kind === 'camel') camelPlaced = true;
+      // At most one gnome per chunk.
+      if (kind === 'gnome' && gnomePlaced) kind = 'root';
+      if (kind === 'gnome') gnomePlaced = true;
       switch (kind) {
         case 'root': this.addRoot(group, i, p, rng); break;
         case 'branch': this.addBranch(group, i, p, rng); break;
@@ -135,6 +155,7 @@ export class Obstacles {
         case 'scree': this.addScree(group, i, p, rng); break;
         case 'sand': this.addPuddle(group, i, p, rng, this.sandMat, 4); break;
         case 'camel': this.addCamel(group, i, p, rng); break;
+        case 'gnome': this.addGnome(group, i, p, rng); break;
         case 'blocks': this.addBlocks(group, i, p, rng); break;
         case 'column': this.addFallenColumn(group, i, p, rng); break;
         case 'basalt': this.addScree(group, i, p, rng, this.basaltMat); break;
@@ -485,6 +506,22 @@ export class Obstacles {
     });
   }
 
+  /** A gnome walking back and forth across the track (no collider: it grabs the apple instead). */
+  private addGnome(group: THREE.Group, chunk: number, p: number, rng: Rng): void {
+    const x = this.terrain.pathCenterX(p);
+    const z = -p;
+    const heading = this.terrain.pathHeading(p);
+    // (cos a, -sin a) points across the lane.
+    const gnome = this.gnomeFactory.build(x, this.terrain.groundHeight(x, z), z, Math.cos(heading), -Math.sin(heading), rng);
+    group.add(gnome.group);
+    let list = this.gnomes.get(chunk);
+    if (!list) {
+      list = [];
+      this.gnomes.set(chunk, list);
+    }
+    list.push(gnome);
+  }
+
   /** Two or three cut sandstone blocks in a row across the track: chip the apple over them. */
   private addBlocks(group: THREE.Group, chunk: number, p: number, rng: Rng): void {
     const cx = this.terrain.pathCenterX(p);
@@ -562,8 +599,83 @@ export class Obstacles {
   }
 
   /** Forget the camels of a chunk that is being removed. */
+  /**
+   * The steel truss bridge over a gorge. The railing is open below its middle
+   * rail, so a sideways kick sends the apple down into the gorge; invisible
+   * walls along the deck and the rims keep the player out of it.
+   */
+  private addBridge(group: THREE.Group, chunk: number, g: Gorge): void {
+    const { x: cx, p: c } = g;
+    // Height of the deck surface.
+    const h = g.h + GORGE.lift;
+    const L = GORGE.deckHalfLen;
+    const W = GORGE.deckHalf;
+    const box = (mat: THREE.Material, x: number, y: number, z: number, sx: number, sy: number, sz: number, rx = 0): void => {
+      const m = new THREE.Mesh(this.wallStoneGeo, mat);
+      m.position.set(x, y, z);
+      m.scale.set(sx, sy, sz);
+      m.rotation.x = rx;
+      m.castShadow = true;
+      m.receiveShadow = true;
+      group.add(m);
+    };
+    const capsule = (ax: number, ay: number, az: number, bx: number, by: number, bz: number, r: number): void => {
+      this.colliders.add(chunk, { kind: 'capsule', ax, ay, az, bx, by, bz, r, surface: SURFACES.metal, blocksPlayer: false });
+    };
+    const wall = (ax: number, az: number, bx: number, bz: number): void => {
+      this.colliders.add(chunk, { kind: 'wall', ax, az, bx, bz, surface: SURFACES.stone, blocksPlayer: true });
+    };
+    const zStart = -(c - L);
+    // Deck planks across the track (top flush with the track).
+    const planks = Math.round((2 * L) / 0.36);
+    const pl = (2 * L) / planks;
+    for (let k = 0; k < planks; k++) {
+      box(k % 3 === 1 ? this.plankDarkMat : this.plankMat, cx, h - 0.05, zStart - (k + 0.5) * pl, 2 * W + 0.12, 0.1, pl - 0.04);
+    }
+    // Two girders and cross beams underneath.
+    for (const sx of [-1, 1]) box(this.steelMat, cx + sx * (W - 0.25), h - 0.42, -c, 0.24, 0.64, 2 * L);
+    for (let k = 0; k <= 18; k++) box(this.steelMat, cx, h - 0.17, zStart - (k * 2 * L) / 18, 2 * W, 0.12, 0.16);
+    // Two stone piers carry the long span.
+    for (const e of [-1, 1]) {
+      const pz = -(c + e * L / 3);
+      box(this.limeMat, cx, h - 0.55 - GORGE.depth / 2, pz, 2 * W - 0.2, GORGE.depth, 1.4);
+    }
+    // Stone abutments on both rims.
+    for (const e of [-1, 1]) box(this.limeMat, cx, h - 2.2, -(c + e * (L - 0.7)), 2 * W + 1.2, 4, 1.5);
+    // Side trusses: posts, a top rail, a middle rail and diagonals in between.
+    const bays = 24;
+    const bay = (2 * L) / bays;
+    const top = 1.2;
+    const mid = 0.62;
+    const diag = Math.hypot(bay, top - mid);
+    const angle = Math.atan2(top - mid, bay);
+    for (const side of [-1, 1]) {
+      const xs = cx + side * (W + 0.05);
+      for (let j = 0; j <= bays; j++) {
+        const z = zStart - j * bay;
+        box(this.steelMat, xs, h + top / 2, z, 0.09, top, 0.09);
+        capsule(xs, h, z, xs, h + top, z, 0.05);
+      }
+      box(this.steelMat, xs, h + top, -c, 0.14, 0.09, 2 * L + 0.1);
+      box(this.steelMat, xs, h + mid, -c, 0.07, 0.07, 2 * L);
+      capsule(xs, h + top, zStart, xs, h + top, -(c + L), 0.06);
+      capsule(xs, h + mid, zStart, xs, h + mid, -(c + L), 0.045);
+      for (let j = 0; j < bays; j++) {
+        const z = zStart - (j + 0.5) * bay;
+        box(this.steelMat, xs, h + (top + mid) / 2, z, 0.05, 0.05, diag, angle);
+        box(this.steelMat, xs, h + (top + mid) / 2, z, 0.05, 0.05, diag, -angle);
+      }
+      // The player stays on the deck and cannot step off a rim.
+      wall(cx + side * W, -(c - L - 0.3), cx + side * W, -(c + L + 0.3));
+      for (const e of [-1, 1]) wall(cx + side * W, -(c + e * GORGE.rim), cx + side * GORGE.reach, -(c + e * GORGE.rim));
+      wall(cx + side * GORGE.reach, -(c - GORGE.rim), cx + side * GORGE.reach, -(c + GORGE.rim));
+    }
+  }
+
   removeChunk(i: number): void {
     this.camels.delete(i);
+    for (const g of this.gnomes.get(i) ?? []) g.removed = true;
+    this.gnomes.delete(i);
   }
 
   static disposeGroup(group: THREE.Group): void {

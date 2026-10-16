@@ -3,6 +3,7 @@ import { AudioEngine } from './audio/audio';
 import { CFG, type Foot } from './config';
 import { Apple } from './entities/apple';
 import { CamelSpit, SPIT_PUSH, type Camel } from './entities/camel';
+import { GnomeBand, type Gnome } from './entities/gnome';
 import { Input } from './entities/input';
 import { Player, type PlayerEvents } from './entities/player';
 import { EASY_LIVES, Hud, type Cause, type Difficulty } from './ui/hud';
@@ -11,6 +12,7 @@ import { Storm } from './weather/storm';
 import { atmosphereAt, createAtmosphere, landscapeAt } from './world/landscape';
 import { Sky } from './world/sky';
 import { sphereContact, type Contact } from './world/colliders';
+import { GORGE } from './world/terrain';
 import { World } from './world/world';
 
 export type GameState = 'menu' | 'playing' | 'paused' | 'lifelost' | 'over';
@@ -51,6 +53,7 @@ export class Game {
   readonly sky: Sky;
   readonly storm: Storm;
   readonly spit: CamelSpit;
+  readonly gnomeBand: GnomeBand;
   world: World;
   player!: Player;
   apple!: Apple;
@@ -131,6 +134,15 @@ export class Game {
     });
 
     this.spit = new CamelSpit(this.scene, (x, z) => this.world.groundHeight(x, z));
+    // The world is rebuilt for every run, so look it up on each call.
+    const world = (): World => this.world;
+    this.gnomeBand = new GnomeBand({
+      groundHeight: (x, z) => this.world.groundHeight(x, z),
+      get colliders() {
+        return world().colliders;
+      },
+      pathOffset: (x, z) => x - this.world.terrain.pathCenterX(-z),
+    });
 
     this.playerEvents = {
       onKick: (power, chip) => {
@@ -194,6 +206,7 @@ export class Game {
     });
     this.scene.add(this.apple.mesh);
     this.player = new Player(this.world, this.input, this.playerEvents);
+    this.player.kickOverride = (foot) => this.kickGnome(foot);
     this.scene.add(this.player.rig);
   }
 
@@ -453,6 +466,10 @@ export class Game {
   /** True when the stretch of path from just behind the player to past the apple is free. */
   respawnClear(p: number): boolean {
     const t = this.world.terrain;
+    if (t.gorgeNear(p, GORGE.rim + 5)) return false;
+    for (const g of this.gnomes()) {
+      if (g.state !== 'down' && Math.abs(-g.group.position.z - (p + APPLE_AHEAD / 2)) < 8) return false;
+    }
     if (Math.abs(t.pathSlope(p)) > 0.08 || Math.abs(t.pathSlope(p + APPLE_AHEAD)) > 0.08) return false;
     for (let q = p - 1; q <= p + APPLE_AHEAD + 1.5; q += 0.25) {
       const x = t.pathCenterX(q);
@@ -588,6 +605,12 @@ export class Game {
       this.world.update(this.player.pos.z);
       this.apple.update(dt);
     }
+    this.gnomeBand.update(dt, this.gnomes(), this.apple, this.player, playing, {
+      onGrab: () => {
+        this.audio.hit(0.6);
+        this.hud.message('Ein Wichtel hat deinen Apfel geklaut! Kick ihn um!', 2400, 'bad');
+      },
+    });
     this.storm.update(dt, this.elapsed, this.player.pos, this.chasedProgress(), playing);
     const globalDark = this.globalDarkness();
     this.sky.update(dt, this.player.camera.getWorldPosition(this.tmp), this.storm.darkness, globalDark, this.storm.flash * (0.4 + 0.6 * globalDark));
@@ -601,6 +624,7 @@ export class Game {
       // The run is lost when the storm catches the player or the apple.
       const dist = this.storm.distanceTo(this.chasedProgress());
       if (dist <= 0) this.caught(this.appleTrails() ? 'apple' : 'player');
+      if (this.appleInGorge()) this.caught('gorge');
       this.updateThirst(dt);
       if (!this.hintFaded && this.elapsed >= HINT_SECONDS) {
         this.hintFaded = true;
@@ -636,6 +660,31 @@ export class Game {
     }
     this.hud.setThirst(this.thirst, CFG.thirst.warnBelow);
     if (this.thirst <= 0) this.caught('thirst');
+  }
+
+  /** True once the apple has dropped well below the rim of a gorge. */
+  private appleInGorge(): boolean {
+    const g = this.world.terrain.gorgeNear(this.apple.progress, GORGE.rim);
+    return g !== null && Math.abs(this.apple.pos.x - g.x) < GORGE.reach && this.apple.pos.y < g.h - 2.5;
+  }
+
+  /**
+   * A swing that reaches a gnome knocks it over (and frees a stolen apple).
+   * A free apple in reach of the foot is kicked as usual.
+   */
+  private kickGnome(foot: Foot): boolean {
+    if (!this.apple.held && this.player.appleInReach(this.apple, foot)) return false;
+    const carried = this.apple.held;
+    const g = this.gnomeBand.kick(this.gnomes(), this.player, this.apple);
+    if (!g) return false;
+    this.audio.kick(0.6);
+    this.audio.hit(1.4);
+    this.hud.message(carried ? 'Umgekickt! Der Wichtel lässt den Apfel fallen.' : 'Wichtel umgekickt!', 1600, 'good');
+    return true;
+  }
+
+  private *gnomes(): Generator<Gnome> {
+    for (const list of this.world.obstacles.gnomes.values()) yield* list;
   }
 
   private *camels(): Generator<Camel> {
@@ -785,6 +834,24 @@ export class Game {
     this.quench();
   }
 
+  /** Gnomes in the generated chunks (testing only). */
+  debugGnomes(): Array<{ id: number; x: number; z: number; state: string; homeX: number; homeZ: number }> {
+    return [...this.gnomes()].map((g) => ({ id: g.id, x: g.group.position.x, z: g.group.position.z, state: g.state, homeX: g.homeX, homeZ: g.homeZ }));
+  }
+
+  /** Gorges of the first landscape sections (testing only). */
+  debugGorges(sections = 6): Array<{ p: number; x: number; h: number }> {
+    const out: Array<{ p: number; x: number; h: number }> = [];
+    for (let k = 0; k < sections; k++) out.push(...this.world.terrain.gorgesIn(k));
+    return out;
+  }
+
+  /** Put the apple at rest at (x, z) (testing only). */
+  debugApple(x: number, z: number): void {
+    this.apple.reset(x, z);
+    this.apple.maxProgress = Math.max(0, -z);
+  }
+
   /** Set the thirst bar (testing only). */
   debugThirst(v: number): void {
     this.thirst = clamp(v, 0, 1);
@@ -827,6 +894,12 @@ export class Game {
       exhausted: this.player.exhausted,
       thirst: this.thirst,
       bottles: this.bottles,
+      appleHeld: this.apple.held,
+      gnomeGrabs: this.gnomeBand.grabs,
+      gnomeKnocked: this.gnomeBand.knocked,
+      holderX: this.gnomeBand.holder?.group.position.x ?? 0,
+      holderZ: this.gnomeBand.holder?.group.position.z ?? 0,
+      groundY: this.world.groundHeight(this.player.pos.x, this.player.pos.z),
       playerGroundGap: this.player.pos.y - this.world.groundHeight(this.player.pos.x, this.player.pos.z),
       appleGroundGap: this.apple.pos.y - this.apple.radius - this.world.groundHeight(this.apple.pos.x, this.apple.pos.z),
       playerPathOffset: this.player.pos.x - this.world.terrain.pathCenterX(this.player.progress),
