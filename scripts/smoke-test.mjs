@@ -622,7 +622,7 @@ try {
     const k = Math.floor(g.p / 1000);
     perSection[k] = (perSection[k] ?? 0) + 1;
   }
-  check(gorges.length > 0 && Object.keys(perSection).every((k) => k % 3 === 1 && perSection[k] <= 2), `gorges only in Greece, at most two per section (${JSON.stringify(perSection)})`);
+  check(gorges.length > 0 && Object.keys(perSection).every((k) => k % 4 === 1 && perSection[k] <= 2), `gorges only in Greece, at most two per section (${JSON.stringify(perSection)})`);
   const gz = gorges[0];
   const onBridge = (g, x, p, yaw = 0) =>
     page.evaluate(([g, x, p, yaw]) => {
