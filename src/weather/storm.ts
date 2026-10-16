@@ -142,14 +142,15 @@ export class Storm {
    * Advance the storm. When `advance` is false (menu, pause, game over) the
    * front line stays put but the visuals keep animating.
    *
-   * The front chases the apple (`appleProgress`): its rubber band works on the
-   * apple's lead. Rain, darkness and lightning follow the player, who sees them.
+   * The front chases whichever is further back, the player or the apple
+   * (`chasedProgress`): its rubber band works on that lead. Rain, darkness and
+   * lightning follow the player, who sees them.
    */
-  update(dt: number, elapsed: number, playerPos: THREE.Vector3, appleProgress: number, advance: boolean): void {
+  update(dt: number, elapsed: number, playerPos: THREE.Vector3, chasedProgress: number, advance: boolean): void {
     this.time += dt;
     const playerProgress = -playerPos.z;
     const dist = this.distanceTo(playerProgress);
-    const appleDist = this.distanceTo(appleProgress);
+    const chasedDist = this.distanceTo(chasedProgress);
 
     // ----- speed: slowly accelerating, capped, with a rubber band whose free
     // lead shrinks over the course of a run.
@@ -157,7 +158,7 @@ export class Storm {
     const cap = S.capBase + S.capGrowth * elapsed;
     let v = Math.min(cap, S.baseSpeed + S.accel * elapsed);
     const lead = Math.max(S.rubberBandMin, S.rubberBandDistance - S.rubberBandShrink * elapsed);
-    if (appleDist > lead) v += (appleDist - lead) * S.rubberBandGain;
+    if (chasedDist > lead) v += (chasedDist - lead) * S.rubberBandGain;
     this.speed = v;
     if (advance) this.progress += v * dt;
 

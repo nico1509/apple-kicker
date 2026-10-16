@@ -120,9 +120,9 @@ export class Hud {
     }
   }
 
-  setStorm(dist: number, danger: number): void {
+  setStorm(dist: number, danger: number, apple: boolean): void {
     const d = Math.max(0, dist);
-    const txt = window.innerWidth < 480 ? `${Math.round(d)} m` : `${Math.round(d)} m hinter dem Apfel`;
+    const txt = window.innerWidth < 480 ? `${Math.round(d)} m` : `${Math.round(d)} m hinter ${apple ? 'dem Apfel' : 'dir'}`;
     if (txt !== this.lastStorm) {
       this.lastStorm = txt;
       this.stormEl.textContent = txt;
@@ -230,12 +230,12 @@ export class Hud {
     `;
   }
 
-  showGameOver(score: number, best: number, isRecord: boolean): void {
+  showGameOver(score: number, best: number, isRecord: boolean, apple: boolean): void {
     this.overlayKind = 'gameover';
     this.overlay.hidden = false;
     this.armedAt = performance.now() + 700;
     this.overlayContent.innerHTML = `
-      <h2>Das Gewitter hat deinen Apfel eingeholt!</h2>
+      <h2>${apple ? 'Das Gewitter hat deinen Apfel eingeholt!' : 'Vom Gewitter eingeholt!'}</h2>
       <p class="score">Dein Apfel kam <b>${Math.floor(score)} m</b> weit.</p>
       ${isRecord ? '<p class="record">Neuer Rekord!</p>' : `<p>Rekord: <b>${Math.floor(best)} m</b></p>`}
       <button class="start" data-action="start">Nochmal versuchen</button>

@@ -268,7 +268,7 @@ export class Game {
       this.saveBest();
     }
     this.audio.gameOver();
-    this.hud.showGameOver(score, this.best, isRecord);
+    this.hud.showGameOver(score, this.best, isRecord, this.appleTrails());
     this.pointerLockWanted = false;
     if (document.pointerLockElement === this.canvas) document.exitPointerLock();
   }
@@ -357,7 +357,7 @@ export class Game {
       this.world.update(this.player.pos.z);
       this.apple.update(dt);
     }
-    this.storm.update(dt, this.elapsed, this.player.pos, this.apple.progress, playing);
+    this.storm.update(dt, this.elapsed, this.player.pos, this.chasedProgress(), playing);
     const globalDark = this.globalDarkness();
     this.sky.update(dt, this.player.camera.getWorldPosition(this.tmp), this.storm.darkness, globalDark, this.storm.flash * (0.4 + 0.6 * globalDark));
     this.updateLighting();
@@ -367,8 +367,8 @@ export class Game {
     this.updateHud();
 
     if (playing) {
-      // The run is lost when the storm catches the apple, not the player.
-      const dist = this.storm.distanceTo(this.apple.progress);
+      // The run is lost when the storm catches the player or the apple.
+      const dist = this.storm.distanceTo(this.chasedProgress());
       if (dist <= 0) this.gameOver();
       if (!this.hintFaded && this.elapsed >= HINT_SECONDS) {
         this.hintFaded = true;
@@ -380,9 +380,19 @@ export class Game {
       }
       if (!this.tipStorm && dist < 40) {
         this.tipStorm = true;
-        this.hud.message('Das Gewitter holt deinen Apfel ein – kick ihn weiter!', 2500, 'bad');
+        this.hud.message(this.appleTrails() ? 'Das Gewitter holt deinen Apfel ein – kick ihn weiter!' : 'Das Gewitter holt auf – lauf!', 2500, 'bad');
       }
     }
+  }
+
+  /** True when the apple is further back than the player, i.e. the storm reaches it first. */
+  private appleTrails(): boolean {
+    return this.apple.progress < this.player.progress;
+  }
+
+  /** Progress of whichever the storm reaches first: the player or the apple. */
+  private chasedProgress(): number {
+    return Math.min(this.apple.progress, this.player.progress);
   }
 
   /**
@@ -417,8 +427,8 @@ export class Game {
   private updateHud(): void {
     const hud = this.hud;
     hud.setDistance(this.apple.maxProgress, Math.max(this.best, this.apple.maxProgress));
-    const dist = this.storm.distanceTo(this.apple.progress);
-    hud.setStorm(dist, clamp(1 - dist / 110, 0, 1));
+    const dist = this.storm.distanceTo(this.chasedProgress());
+    hud.setStorm(dist, clamp(1 - dist / 110, 0, 1), this.appleTrails());
     hud.setStamina(this.player.stamina);
     hud.setVignette(this.storm.intensity * 0.8);
     const drag = this.input.drag;
@@ -535,7 +545,8 @@ export class Game {
       playerYaw: this.player.yaw,
       playerPitch: this.player.pitch,
       stormProgress: this.storm.progress,
-      stormDistance: this.storm.distanceTo(this.apple.progress),
+      stormDistance: this.storm.distanceTo(this.chasedProgress()),
+      stormAppleDistance: this.storm.distanceTo(this.apple.progress),
       stormPlayerDistance: this.storm.distanceTo(this.player.progress),
       appleIndicator: this.indicatorShown,
       stormSpeed: this.storm.speed,

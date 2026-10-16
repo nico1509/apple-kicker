@@ -227,20 +227,28 @@ try {
   await shot('05b-far-apple-marked.png');
   check(m2.appleIndicator, `apple 75 m away in view is marked (indicator=${m2.appleIndicator})`);
 
-  // The storm overtaking the player does not end the run – only the apple counts.
+  // Storm catches the player (apple far ahead) → game over.
   await page.evaluate(() => {
     const g = window.__appleKicker.game;
-    g.storm.progress = g.player.progress + 5;
+    g.storm.progress = g.player.progress - 0.5;
   });
   await simulate(1);
   const o1 = await state();
-  check(o1.state === 'playing' && o1.stormPlayerDistance < 0 && o1.stormDistance > 0, `storm passing the player keeps the run going (player ${o1.stormPlayerDistance.toFixed(1)} m, apple ${o1.stormDistance.toFixed(1)} m)`);
+  check(o1.state === 'over' && o1.stormPlayerDistance <= 0 && o1.stormAppleDistance > 0, `storm catching the player ends the run (player ${o1.stormPlayerDistance.toFixed(1)} m, apple ${o1.stormAppleDistance.toFixed(1)} m)`);
 
-  // Storm catches the apple → game over.
-  await simulate(70);
+  // Storm catches the apple (player far ahead) → game over.
+  await page.evaluate(() => window.__appleKicker.start());
+  await page.evaluate(() => window.__appleKicker.teleport(300));
+  await simulate(0.3);
+  await placeApple(260);
+  await page.evaluate(() => {
+    const g = window.__appleKicker.game;
+    g.storm.progress = 250;
+  });
+  await simulate(10);
   const s3 = await state();
   await shot('06-storm.png');
-  check(s3.state === 'over' && s3.stormDistance <= 0, `storm catching the apple ends the run (state=${s3.state}, dist=${s3.stormDistance.toFixed(1)})`);
+  check(s3.state === 'over' && s3.stormAppleDistance <= 0 && s3.stormPlayerDistance > 0, `storm catching the apple ends the run (apple ${s3.stormAppleDistance.toFixed(1)} m, player ${s3.stormPlayerDistance.toFixed(1)} m)`);
 
   // Restart works.
   await page.evaluate(() => window.__appleKicker.start());
