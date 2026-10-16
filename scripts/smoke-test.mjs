@@ -412,12 +412,15 @@ try {
       for (const o of list) if (o !== ic) minGap = Math.min(minGap, Math.hypot(o.x - ic.x, o.z - ic.z));
     }
     const ps = list.map((ic) => ic.p);
-    return { off, blocked, n: list.length, minGap, clear: g.respawnClear(Math.min(...ps) - 0.6), from: Math.min(...ps), to: Math.max(...ps) };
+    // A respawn with player and apple right beside an icicle near the centre line is refused.
+    const central = list.filter((ic) => Math.abs(ic.x - t.pathCenterX(ic.p)) < 0.9);
+    const clear = central.some((ic) => g.respawnClear(ic.p - 0.6));
+    return { off, blocked, n: list.length, minGap, central: central.length, clear, from: Math.min(...ps) };
   });
   check(ice.off < 2.3, `icicles stand on the track (max ${ice.off.toFixed(2)} m off centre)`);
   check(ice.blocked === ice.n, `every icicle is an obstacle (${ice.blocked}/${ice.n} colliders)`);
   check(ice.minGap >= 1.5, `icicles leave room to get through (closest ${ice.minGap.toFixed(2)} m)`);
-  check(!ice.clear, 'nobody respawns among the icicles');
+  check(!ice.clear, `nobody respawns among the icicles (${ice.central} near the centre line)`);
   await page.evaluate((from) => {
     const g = window.__appleKicker.game;
     g.player.reset(g.world.terrain.pathCenterX(from - 4), -(from - 4), 0);
@@ -600,7 +603,8 @@ try {
   await simulate(0.4, ['KeyW', 'ShiftLeft']);
   const x0 = await state();
   check(x0.exhausted > 0.5, `empty stamina leaves the player out of breath (${x0.exhausted.toFixed(2)} s)`);
-  check((await page.textContent('.message')).includes('Puste'), 'a hint says the player is out of breath');
+  const breath = await page.textContent('.message');
+  check(breath.includes('Puste'), `a hint says the player is out of breath (${breath})`);
   await simulate(0.4, ['KeyW']);
   const x1 = await state();
   check(Math.abs(x1.playerZ - x0.playerZ) < 0.3, `out of breath the player cannot walk (${(x0.playerZ - x1.playerZ).toFixed(2)} m)`);
