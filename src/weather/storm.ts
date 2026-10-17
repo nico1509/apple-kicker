@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { CFG } from '../config';
 import { clamp, smoothstep } from '../utils/math';
 import { mulberry32, rand } from '../utils/noise';
+import { LANDSCAPE_LENGTH } from '../world/landscape';
 
 export interface StormEvents {
   onThunder(volume: number): void;
@@ -143,21 +144,22 @@ export class Storm {
    * front line stays put but the visuals keep animating.
    *
    * The front chases whichever is further back, the player or the apple
-   * (`chasedProgress`): its rubber band works on that lead. Rain, darkness and
-   * lightning follow the player, who sees them.
+   * (`chasedProgress`): its speed and its rubber band follow that position
+   * within the current landscape. Rain, darkness and lightning follow the
+   * player, who sees them.
    */
-  update(dt: number, elapsed: number, playerPos: THREE.Vector3, chasedProgress: number, advance: boolean): void {
+  update(dt: number, playerPos: THREE.Vector3, chasedProgress: number, advance: boolean): void {
     this.time += dt;
     const playerProgress = -playerPos.z;
     const dist = this.distanceTo(playerProgress);
     const chasedDist = this.distanceTo(chasedProgress);
 
-    // ----- speed: slowly accelerating, capped, with a rubber band whose free
-    // lead shrinks over the course of a run.
+    // ----- speed: slowest at the start of every landscape, fastest at its end,
+    // with a rubber band whose free lead shrinks over the landscape.
     const S = CFG.storm;
-    const cap = S.capBase + S.capGrowth * elapsed;
-    let v = Math.min(cap, S.baseSpeed + S.accel * elapsed);
-    const lead = Math.max(S.rubberBandMin, S.rubberBandDistance - S.rubberBandShrink * elapsed);
+    const t = (Math.max(0, chasedProgress) % LANDSCAPE_LENGTH) / LANDSCAPE_LENGTH;
+    let v = S.baseSpeed + (S.topSpeed - S.baseSpeed) * t;
+    const lead = S.rubberBandDistance + (S.rubberBandMin - S.rubberBandDistance) * t;
     if (chasedDist > lead) v += (chasedDist - lead) * S.rubberBandGain;
     this.speed = v;
     if (advance) this.progress += v * dt;

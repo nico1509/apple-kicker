@@ -50,7 +50,8 @@ dem Apfel außerdem einen leichten Drall nach innen (linker Fuß: nach rechts, r
 
 * Gezählt werden die Meter, die der **Apfel** entlang des Weges zurücklegt.
 * Hinter dir zieht eine Schlechtwetterfront mit Regen und Gewitter heran. Sie wird
-  mit der Zeit schneller. Holt sie **dich oder deinen Apfel** ein, kostet das ein Leben.
+  mit der Strecke schneller und lässt zwischendurch wieder nach. Holt sie **dich oder
+  deinen Apfel** ein, kostet das ein Leben.
 * Kicken macht durstig: Die **Durst-Anzeige** leert sich schnell. Auf dem Weg schweben
   Apfelschorle-Flaschen, jede füllt die Anzeige wieder ganz auf. Ist sie leer, bist du
   verdurstet – das kostet ebenfalls ein Leben.
