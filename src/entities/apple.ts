@@ -72,7 +72,14 @@ export class Apple {
       colors[i * 3 + 2] = c.b;
     }
     geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-    const mat = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true });
+    // Glows a little in its own colours, like the bottle labels, so it stays visible in the storm.
+    const mat = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true, emissive: 0xffffff, emissiveIntensity: 0.3 });
+    mat.onBeforeCompile = (shader) => {
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <emissivemap_fragment>',
+        '#include <emissivemap_fragment>\n\ttotalEmissiveRadiance *= vColor.rgb;',
+      );
+    };
     this.body = new THREE.Mesh(geo, mat);
     this.body.castShadow = true;
     this.body.receiveShadow = false;

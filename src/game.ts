@@ -88,9 +88,8 @@ export class Game {
   private readonly contact: Contact = { nx: 0, ny: 0, nz: 0, depth: 0, surface: { restitution: 0, friction: 0 } };
   private tipObstacles = false;
   private tipStorm = false;
-  private tipWhiff = false;
-  private tipZombie = false;
-  private thirstWarned = false;
+  /** Hints already shown this run; each one appears only once until a restart or kickstart. */
+  private readonly shownHints = new Set<string>();
   private lastCause: Cause = 'player';
   /** Clock for the spinning bottles. */
   private animTime = 0;
@@ -166,19 +165,14 @@ export class Game {
     this.playerEvents = {
       onKick: (power, chip) => {
         this.audio.kick(power);
-        if (power > 0.85) this.hud.message(chip ? 'Hoher Lupfer!' : 'Volle Kraft!', 1200, 'good');
+        if (power > 0.85) this.hint(chip ? 'Hoher Lupfer!' : 'Volle Kraft!', 1200, 'good');
       },
       onWhiff: () => {
         this.audio.whiff();
-        if (!this.tipWhiff) {
-          this.tipWhiff = true;
-          this.hud.message('Verfehlt! Der Apfel muss dicht vor dem Fuß liegen.', 2600, 'bad');
-        } else {
-          this.hud.message('Verfehlt!', 900, 'bad');
-        }
+        this.hint('Verfehlt! Der Apfel muss dicht vor dem Fuß liegen.', 2600, 'bad');
       },
       onFootstep: (sprinting) => this.audio.footstep(sprinting),
-      onExhausted: () => this.hud.message('Aus der Puste! Kurz verschnaufen …', 1300, 'bad'),
+      onExhausted: () => this.hint('Aus der Puste! Kurz verschnaufen …', 1300, 'bad'),
     };
 
     this.seed = (Math.random() * 0xffffffff) >>> 0;
@@ -242,18 +236,23 @@ export class Game {
     this.bottles = 0;
     this.tipObstacles = false;
     this.tipStorm = false;
-    this.tipWhiff = false;
-    this.tipZombie = false;
+    this.shownHints.clear();
     this.hintFaded = false;
     this.player.update(0, this.apple, true);
     this.updateLighting();
     this.hud.setLives(this.lives, this.maxLives());
   }
 
+  /** A hint in the message line, shown only the first time per run (until a restart or kickstart). */
+  private hint(text: string, duration: number, kind: 'info' | 'bad' | 'good' = 'info'): void {
+    if (this.shownHints.has(text)) return;
+    this.shownHints.add(text);
+    this.hud.message(text, duration, kind);
+  }
+
   /** Fill the thirst bar completely (start of a run, after a lost life). */
   private quench(): void {
     this.thirst = 1;
-    this.thirstWarned = false;
     this.hud.setThirst(this.thirst, CFG.thirst.warnBelow);
   }
 
@@ -449,7 +448,6 @@ export class Game {
     // The storm's speed follows the position within the landscape by itself.
     this.elapsed = 0;
     this.quench();
-    this.tipStorm = false;
     this.tipObstacles = true;
     this.player.update(0, this.apple, true);
     this.updateLighting();
@@ -625,7 +623,7 @@ export class Game {
       // A hit pushes the player along the flight direction of the spit.
       this.player.shove(dx * SPIT_PUSH, dz * SPIT_PUSH);
       this.audio.hit(0.5);
-      this.hud.message('Angespuckt!', 1100, 'bad');
+      this.hint('Angespuckt!', 1100, 'bad');
     });
     if (playing) {
       this.world.update(this.player.pos.z);
@@ -634,32 +632,30 @@ export class Game {
     this.gnomeBand.update(dt, this.gnomes(), this.apple, this.player, playing, {
       onGrab: () => {
         this.audio.hit(0.6);
-        this.hud.message('Ein Wichtel hat deinen Apfel geklaut! Kick ihn um!', 2400, 'bad');
+        this.hint('Ein Wichtel hat deinen Apfel geklaut! Kick ihn um!', 2400, 'bad');
       },
     });
     this.zombieHorde.update(dt, this.zombies(), this.apple, this.player, playing, {
       onChase: () => {
-        if (this.tipZombie) return;
-        this.tipZombie = true;
-        this.hud.message('Ein Zombie! Kick ihn um, bevor er zuschlägt!', 2600, 'bad');
+        this.hint('Ein Zombie! Kick ihn um, bevor er zuschlägt!', 2600, 'bad');
       },
       onWindup: () => this.audio.groan(),
       onHit: () => {
         this.player.loseBreath();
         this.audio.hit(1.2);
-        this.hud.message('Ein Zombie hat dich erwischt! Keine Puste mehr …', 1800, 'bad');
+        this.hint('Ein Zombie hat dich erwischt! Keine Puste mehr …', 1800, 'bad');
       },
     });
     this.iceMonster.update(dt, this.player, this.apple, playing, {
       onAppear: () => {
         this.audio.roar();
-        this.hud.message('Ein Eismonster! Vorsicht vor den Eiszapfen!', 2600, 'bad');
+        this.hint('Ein Eismonster! Vorsicht vor den Eiszapfen!', 2600, 'bad');
       },
       onIcicle: () => this.audio.iceCrack(),
       onBump: (dx, dz) => {
         this.player.shove(dx, dz);
         this.audio.hit(1);
-        this.hud.message('Umgerannt!', 1000, 'bad');
+        this.hint('Umgerannt!', 1000, 'bad');
       },
       onKnockApple: (vx, vz) => this.apple.nudge(vx, vz),
     });
@@ -701,14 +697,11 @@ export class Game {
       this.bottles += got;
       this.thirst = Math.min(1, this.thirst + got * CFG.thirst.refill);
       this.audio.drink();
-      this.hud.message('Apfelschorle! Ahh …', 1100, 'good');
+      this.hint('Apfelschorle! Ahh …', 1100, 'good');
     }
     this.thirst = Math.max(0, this.thirst - dt / CFG.thirst.drainSeconds);
-    if (this.thirst >= CFG.thirst.warnBelow) {
-      this.thirstWarned = false;
-    } else if (!this.thirstWarned && this.thirst > 0) {
-      this.thirstWarned = true;
-      this.hud.message('Durst! Schnapp dir eine Apfelschorle auf dem Weg.', 2400, 'bad');
+    if (this.thirst < CFG.thirst.warnBelow && this.thirst > 0) {
+      this.hint('Durst! Schnapp dir eine Apfelschorle auf dem Weg.', 2400, 'bad');
     }
     this.hud.setThirst(this.thirst, CFG.thirst.warnBelow);
     if (this.thirst <= 0) this.caught('thirst');
@@ -731,13 +724,13 @@ export class Game {
     if (g) {
       this.audio.kick(0.6);
       this.audio.hit(1.4);
-      this.hud.message(carried ? 'Umgekickt! Der Wichtel lässt den Apfel fallen.' : 'Wichtel umgekickt!', 1600, 'good');
+      this.hint(carried ? 'Umgekickt! Der Wichtel lässt den Apfel fallen.' : 'Wichtel umgekickt!', 1600, 'good');
       return true;
     }
     if (!this.zombieHorde.kick(this.zombies(), this.player)) return false;
     this.audio.kick(0.7);
     this.audio.hit(1.6);
-    this.hud.message('Zombie umgekickt!', 1400, 'good');
+    this.hint('Zombie umgekickt!', 1400, 'good');
     return true;
   }
 
