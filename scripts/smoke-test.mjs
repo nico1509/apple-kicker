@@ -650,6 +650,7 @@ try {
   await clickEl('[data-action="kickstart"]');
   await simulate(0.1);
   const k0 = await state();
+  check(await page.evaluate(() => document.fullscreenElement === document.documentElement), 'starting a run with a click enters fullscreen');
   await look(k0.playerYaw, -0.3);
   await simulate(0.05);
   await shot('11-kickstart.png');

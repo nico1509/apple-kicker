@@ -534,7 +534,21 @@ export class Game {
     this.hud.showGameOver(score, this.best, isRecord, this.lastCause, this.maxLives());
   }
 
+  /** Enter fullscreen when play starts; only works right after a click or key press, so failures are ignored. */
+  private requestFullscreen(): void {
+    const doc = document as Document & { webkitFullscreenElement?: Element | null };
+    if (document.fullscreenElement || doc.webkitFullscreenElement) return;
+    const el = document.documentElement as HTMLElement & { webkitRequestFullscreen?: () => void };
+    try {
+      if (el.requestFullscreen) el.requestFullscreen({ navigationUI: 'hide' }).catch(() => undefined);
+      else el.webkitRequestFullscreen?.();
+    } catch {
+      /* fullscreen unavailable (e.g. iPhone): the game runs in the normal window */
+    }
+  }
+
   private requestPointerLock(): void {
+    this.requestFullscreen();
     this.pointerLockWanted = true;
     try {
       const p = this.canvas.requestPointerLock() as unknown;
