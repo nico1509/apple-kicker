@@ -668,6 +668,22 @@ try {
   const vNext = await stormSpeedAt(1060);
   const vNextEnd = await stormSpeedAt(1990);
   check(vStart < 2.4 && vEnd > 3.7 && vNext < 2.4 && vNextEnd > 3.7, `storm speed follows the position in the landscape (${vStart.toFixed(2)} → ${vEnd.toFixed(2)}, ${vNext.toFixed(2)} → ${vNextEnd.toFixed(2)} m/s)`);
+  // Walking into the next landscape gives back one lost life, never above the maximum.
+  const crossInto = async (lives, from, to) => {
+    await page.evaluate(([l, f, t]) => {
+      const g = window.__appleKicker.game;
+      g.placeRunAt(f);
+      g.lives = l;
+      g.player.reset(g.world.terrain.pathCenterX(t), -t, 0);
+    }, [lives, from, to]);
+    await simulate(0.05);
+    return (await state()).lives;
+  };
+  const l1 = await crossInto(1, 2990, 3004);
+  const l1again = await crossInto(1, 3005, 3010);
+  const l2 = await crossInto(2, 3990, 4004);
+  const lFull = await crossInto(3, 4990, 5004);
+  check(l1 === 2 && l1again === 1 && l2 === 3 && lFull === 3, `next landscape gives back a life, once per landscape, at most 3 (${l1}, ${l1again}, ${l2}, ${lFull})`);
   await page.evaluate(() => window.__appleKicker.game.pause());
   await clickEl('[data-action="restart"]');
   await simulate(0.1);

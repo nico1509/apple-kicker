@@ -11,7 +11,7 @@ import { ZombieHorde, type Zombie } from './entities/zombie';
 import { EASY_LIVES, Hud, type Cause, type Difficulty } from './ui/hud';
 import { clamp, lerp, smoothstep } from './utils/math';
 import { Storm } from './weather/storm';
-import { atmosphereAt, createAtmosphere, landscapeAt } from './world/landscape';
+import { atmosphereAt, createAtmosphere, LANDSCAPE_LENGTH, landscapeAt } from './world/landscape';
 import { Sky } from './world/sky';
 import { sphereContact, type Contact } from './world/colliders';
 import { GORGE } from './world/terrain';
@@ -68,6 +68,8 @@ export class Game {
   difficulty: Difficulty = 'easy';
   /** Lives left in the easy mode. */
   lives = EASY_LIVES;
+  /** Highest landscape section the player has entered in this run; each new one gives back a lost life. */
+  landscapeReached = 0;
   /** Thirst bar: 1 = quenched, 0 = parched. */
   thirst = 1;
   /** Bottles drunk in this run. */
@@ -232,6 +234,7 @@ export class Game {
     this.iceMonster.reset(this.seed);
     this.elapsed = 0;
     this.lives = this.maxLives();
+    this.landscapeReached = 0;
     this.quench();
     this.bottles = 0;
     this.tipObstacles = false;
@@ -442,6 +445,8 @@ export class Game {
     const p = this.respawnProgress(reached);
     this.placeOnPath(p);
     this.apple.maxProgress = reached;
+    // Respawning into a landscape gives no life; only walking into the next one does.
+    this.landscapeReached = Math.max(this.landscapeReached, Math.floor(p / LANDSCAPE_LENGTH));
     this.iceMonster.dismiss();
     this.storm.reset();
     this.storm.progress = p - CFG.storm.startBehind;
@@ -674,6 +679,7 @@ export class Game {
       if (dist <= 0) this.caught(this.appleTrails() ? 'apple' : 'player');
       if (this.appleInGorge()) this.caught('gorge');
       this.updateThirst(dt);
+      this.updateLandscapeLife();
       if (!this.hintFaded && this.elapsed >= HINT_SECONDS) {
         this.hintFaded = true;
         this.hud.setHintVisible(false);
@@ -687,6 +693,18 @@ export class Game {
         this.hud.message(this.appleTrails() ? 'Das Gewitter holt deinen Apfel ein – kick ihn weiter!' : 'Das Gewitter holt auf – lauf!', 2500, 'bad');
       }
     }
+  }
+
+  /** Easy mode: entering the next landscape gives back one lost life (once per landscape and run). */
+  private updateLandscapeLife(): void {
+    const k = Math.floor(this.player.progress / LANDSCAPE_LENGTH);
+    if (k <= this.landscapeReached) return;
+    this.landscapeReached = k;
+    if (this.difficulty !== 'easy' || this.lives >= this.maxLives()) return;
+    this.lives++;
+    this.hud.setLives(this.lives, this.maxLives());
+    this.audio.chime();
+    this.hud.message('Ein Leben zurück!', 2400, 'good');
   }
 
   /** The thirst bar drains fast; a bottle on the path fills it up again. Empty costs a life. */
@@ -884,6 +902,7 @@ export class Game {
     this.player.reset(x, -progress, 0);
     this.apple.reset(this.world.terrain.pathCenterX(progress + 1.2), -(progress + 1.2));
     this.apple.maxProgress = progress;
+    this.landscapeReached = Math.max(this.landscapeReached, Math.floor(progress / LANDSCAPE_LENGTH));
     this.storm.progress = progress - CFG.storm.startBehind;
     this.world.prewarm(-progress);
     this.iceMonster.dismiss();
@@ -951,6 +970,7 @@ export class Game {
       appleIndicator: this.indicatorShown,
       difficulty: this.difficulty,
       lives: this.lives,
+      landscapeReached: this.landscapeReached,
       stamina: this.player.stamina,
       exhausted: this.player.exhausted,
       thirst: this.thirst,
