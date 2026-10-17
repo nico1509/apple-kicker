@@ -64,13 +64,10 @@ export const CFG = {
   },
   storm: {
     startBehind: 58, // metres behind the start line
-    baseSpeed: 2.2,
-    accel: 0.008, // m/s gained per second
-    capBase: 3.7,
-    capGrowth: 0.0011, // cap grows slowly so every run ends eventually
-    rubberBandDistance: 140, // free lead at the start ...
-    rubberBandMin: 70, // ... shrinking to this ...
-    rubberBandShrink: 0.3, // ... by this many metres per second
+    baseSpeed: 2.2, // at the start of every landscape ...
+    topSpeed: 3.9, // ... rising linearly to this at its end
+    rubberBandDistance: 140, // free lead at the start of every landscape ...
+    rubberBandMin: 70, // ... shrinking linearly to this at its end
     rubberBandGain: 0.03,
     rainStart: 42, // rain becomes visible below this distance
     darkStart: 120, // the storm becomes visible in the sky behind the player below this distance

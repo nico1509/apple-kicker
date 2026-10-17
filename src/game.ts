@@ -435,7 +435,7 @@ export class Game {
     this.iceMonster.dismiss();
     this.storm.reset();
     this.storm.progress = p - CFG.storm.startBehind;
-    // The storm starts slow again, as at the start of a run.
+    // The storm's speed follows the position within the landscape by itself.
     this.elapsed = 0;
     this.quench();
     this.tipStorm = false;
@@ -636,7 +636,7 @@ export class Game {
       },
       onKnockApple: (vx, vz) => this.apple.nudge(vx, vz),
     });
-    this.storm.update(dt, this.elapsed, this.player.pos, this.chasedProgress(), playing);
+    this.storm.update(dt, this.player.pos, this.chasedProgress(), playing);
     const globalDark = this.globalDarkness();
     this.sky.update(dt, this.player.camera.getWorldPosition(this.tmp), this.storm.darkness, globalDark, this.storm.flash * (0.4 + 0.6 * globalDark));
     this.updateLighting();

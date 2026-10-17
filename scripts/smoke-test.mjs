@@ -537,6 +537,18 @@ try {
   check(k0.state === 'playing' && k0.lives === 3, `Kickstart starts a run with all lives (${k0.state}, ${k0.lives})`);
   check(Math.abs(k0.appleMax - rec) < 1e-6 && -k0.playerZ <= rec && -k0.playerZ > rec - 40, `Kickstart starts at the record (${rec.toFixed(1)} m → player at ${(-k0.playerZ).toFixed(1)} m)`);
   check(Math.abs(k0.playerGroundGap) < 0.02 && Math.abs(k0.playerPathOffset) < 0.05, 'Kickstart puts the player on the path');
+  // The storm is slowest at the start of every landscape and fastest at its end,
+  // also after a respawn further down the path.
+  const stormSpeedAt = async (m) => {
+    await page.evaluate((x) => window.__appleKicker.game.placeRunAt(x), m);
+    await simulate(0.05);
+    return (await state()).stormSpeed;
+  };
+  const vStart = await stormSpeedAt(60);
+  const vEnd = await stormSpeedAt(990);
+  const vNext = await stormSpeedAt(1060);
+  const vNextEnd = await stormSpeedAt(1990);
+  check(vStart < 2.4 && vEnd > 3.7 && vNext < 2.4 && vNextEnd > 3.7, `storm speed follows the position in the landscape (${vStart.toFixed(2)} → ${vEnd.toFixed(2)}, ${vNext.toFixed(2)} → ${vNextEnd.toFixed(2)} m/s)`);
   await page.evaluate(() => window.__appleKicker.game.pause());
   await clickEl('[data-action="restart"]');
   await simulate(0.1);
