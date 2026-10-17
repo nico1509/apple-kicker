@@ -274,7 +274,7 @@ try {
   check(m3.appleIndicator, `apple 75 m away in view is marked (indicator=${m3.appleIndicator})`);
 
   // The landscape changes every 1000 m and loops back to the forest.
-  for (const [at, expected, name] of [[1150, 'greece', '05c-greece.png'], [1620, 'greece', '05d-greece-later.png'], [2150, 'desert', '05e-desert.png'], [3150, 'antarctic', '05f-antarctic.png'], [4150, 'forest', '05h-forest-again.png']]) {
+  for (const [at, expected, name] of [[1150, 'greece', '05c-greece.png'], [1620, 'greece', '05d-greece-later.png'], [2150, 'desert', '05e-desert.png'], [3150, 'antarctic', '05f-antarctic.png'], [4150, 'town', '05g-town.png'], [5150, 'forest', '05h-forest-again.png']]) {
     await page.evaluate((p) => window.__appleKicker.teleport(p), at);
     await look(0, -0.12);
     await simulate(0.3);
@@ -283,7 +283,7 @@ try {
     check(sl.landscape === expected, `landscape at ${at} m is ${expected} (${sl.landscape})`);
   }
   const rg = await walkAndKick('right', 320, 0);
-  check(rg.after.appleMax > 4150, `apple still moves after the landscapes looped (${rg.after.appleMax.toFixed(1)} m)`);
+  check(rg.after.appleMax > 5150, `apple still moves after the landscapes looped (${rg.after.appleMax.toFixed(1)} m)`);
   await page.evaluate(() => window.__appleKicker.teleport(1300));
   const rg2 = await walkAndKick('right', 320, 0);
   check(rg2.after.appleMax > 1300, `apple moves through Greek obstacles (${rg2.after.appleMax.toFixed(1)} m)`);
@@ -349,12 +349,12 @@ try {
   check(ra.after.appleMax > 3300, `apple moves through Antarctic obstacles (${ra.after.appleMax.toFixed(1)} m)`);
   const visits = await page.evaluate(() => {
     const m = window.__appleKicker.game.iceMonster;
-    return [0, 1, 2, 3, 7].map((k) => m.triggersIn(k).length);
+    return [0, 1, 2, 3, 8, 4].map((k) => m.triggersIn(k).length);
   });
   check(visits[3] >= 3 && visits[3] <= 4 && visits[4] >= 3 && visits[4] <= 4, `the ice monster turns up 3–4 times per Antarctic landscape (${visits[3]}, ${visits[4]})`);
-  check(visits[0] + visits[1] + visits[2] === 0, `no ice monster elsewhere (${visits.slice(0, 3).join(', ')})`);
+  check(visits[0] + visits[1] + visits[2] + visits[5] === 0, `no ice monster elsewhere (${[...visits.slice(0, 3), visits[5]].join(', ')})`);
   // One in the next Antarctic landscape (the one at 3000 m may already be behind us).
-  const trigger = await page.evaluate(() => window.__appleKicker.game.iceMonster.triggersIn(7)[0]);
+  const trigger = await page.evaluate(() => window.__appleKicker.game.iceMonster.triggersIn(8)[0]);
   await page.evaluate((t) => {
     const k = window.__appleKicker;
     k.teleport(t - 30);
@@ -428,6 +428,125 @@ try {
   }, ice.from);
   await simulate(0.05);
   await shot('05j-icicles.png');
+
+  // Town: obstacles on the road, and zombies that follow the player, hit and can be kicked over.
+  await page.evaluate(() => window.__appleKicker.teleport(4300));
+  const rt = await walkAndKick('right', 320, 0);
+  check(rt.after.appleMax > 4300, `apple moves through the town (${rt.after.appleMax.toFixed(1)} m)`);
+  const zcount = await page.evaluate(() => {
+    const k = window.__appleKicker;
+    const seen = new Set();
+    for (let p = 4050; p < 4950; p += 150) {
+      k.teleport(p);
+      for (const z of k.game.debugZombies()) if (-z.z > 4000 && -z.z < 5000) seen.add(z.id);
+    }
+    let elsewhere = 0;
+    for (const p of [5300, 5600]) {
+      k.teleport(p);
+      elsewhere += k.game.debugZombies().filter((z) => -z.z > 5100).length;
+    }
+    return { town: seen.size, elsewhere };
+  });
+  check(zcount.town >= 3, `zombies wander about the town (${zcount.town})`);
+  check(zcount.elsewhere === 0, `no zombies outside the town (${zcount.elsewhere})`);
+  // Put a zombie on a clear bit of road and the player 24 m behind it.
+  const zsetup = async (gap) => page.evaluate((gap) => {
+    const k = window.__appleKicker;
+    const g = k.game;
+    k.teleport(4500);
+    const zs = [...g.world.obstacles.zombies.values()].flat().filter((z) => z.state !== 'down' && -z.group.position.z > 4520);
+    const zb = zs[0];
+    // Only this one is about: the others lie knocked over.
+    for (const o of [...g.world.obstacles.zombies.values()].flat()) if (o !== zb) o.state = 'down';
+    const t = g.world.terrain;
+    const zp = -zb.group.position.z;
+    zb.group.position.x = t.pathCenterX(zp);
+    zb.state = 'wander';
+    zb.cooldown = 0;
+    zb.homeX = zb.targetX = zb.group.position.x;
+    zb.homeZ = zb.targetZ = zb.group.position.z;
+    zb.pause = 99;
+    g.player.reset(t.pathCenterX(zp - gap), -(zp - gap), 0);
+    g.storm.progress = zp - gap - 150;
+    g.debugThirst(1);
+    window.__zombie = zb;
+    return { id: zb.id, zp };
+  }, gap);
+  const zstate = () => page.evaluate(() => {
+    const g = window.__appleKicker.game;
+    const zb = window.__zombie;
+    const p = g.player.pos;
+    return { game: g.state, state: zb.state, dist: Math.hypot(zb.group.position.x - p.x, zb.group.position.z - p.z), cooldown: zb.cooldown, hits: g.zombieHorde.hits, swings: g.zombieHorde.swings, knocked: g.zombieHorde.knocked, stamina: g.player.stamina, exhausted: g.player.exhausted };
+  });
+  await zsetup(24);
+  await simulate(1);
+  const z0 = await zstate();
+  check(z0.game === 'playing' && z0.state === 'wander', `a zombie ignores a player 24 m away (${z0.game}, ${z0.state}, ${z0.dist.toFixed(1)} m)`);
+  await page.evaluate(() => {
+    const g = window.__appleKicker.game;
+    const zb = window.__zombie;
+    const t = g.world.terrain;
+    const q = -zb.group.position.z - 15;
+    g.player.reset(t.pathCenterX(q), -q, 0);
+  });
+  await simulate(1);
+  const z1 = await zstate();
+  check(z1.state === 'chase' && z1.dist < 14.5, `within 20 m it follows the player (${z1.state}, ${z1.dist.toFixed(1)} m)`);
+  // Stand still: it comes close, draws back and hits; the blow takes all of the stamina.
+  let z2 = z1;
+  for (let i = 0; i < 40 && z2.hits === 0; i++) {
+    await page.evaluate(() => window.__appleKicker.game.debugThirst(1));
+    await simulate(0.25);
+    z2 = await zstate();
+  }
+  check(z2.hits === 1 && z2.dist < 2.2, `standing close it hits the player (${z2.hits} hits in ${z2.swings} swings at ${z2.dist.toFixed(2)} m)`);
+  check(z2.stamina < 0.3 && z2.exhausted > 0.7, `a hit takes all the stamina (${z2.stamina.toFixed(2)}, out of breath ${z2.exhausted.toFixed(2)} s)`);
+  await simulate(2.6);
+  const z3 = await zstate();
+  check(z3.swings === z2.swings, `it hits at most every 3 s (${z3.swings - z2.swings} more swings after 2.6 s)`);
+  for (let i = 0; i < 12 && z3.swings === z2.swings; i++) {
+    await simulate(0.25);
+    Object.assign(z3, await zstate());
+  }
+  check(z3.swings === z2.swings + 1 && z3.hits === 2, `after the pause it hits again (${z3.swings - z2.swings} more swings, ${z3.hits} hits)`);
+  // Stepping back while it draws back makes it miss.
+  for (let i = 0; i < 50 && (await zstate()).state !== 'windup'; i++) await simulate(0.1);
+  await page.evaluate(() => {
+    const g = window.__appleKicker.game;
+    const zb = window.__zombie;
+    g.player.pos.z = zb.group.position.z + 3.2;
+    g.player.pos.x = zb.group.position.x;
+  });
+  await simulate(1);
+  const z4 = await zstate();
+  check(z4.swings === z3.swings + 1 && z4.hits === 2, `stepping out of reach makes it miss (${z4.swings - z3.swings} more swings, ${z4.hits} hits)`);
+  // Kick it over before it can hit.
+  await zsetup(6);
+  await page.evaluate(() => {
+    const g = window.__appleKicker.game;
+    const zb = window.__zombie;
+    g.apple.reset(zb.group.position.x + 2.5, zb.group.position.z + 6);
+  });
+  for (let i = 0; i < 80 && (await zstate()).dist > 2.1; i++) await simulate(0.05);
+  await page.evaluate(() => {
+    const k = window.__appleKicker;
+    const g = k.game;
+    const zb = window.__zombie;
+    const p = g.player.pos;
+    k.look(Math.atan2(-(zb.group.position.x - p.x), -(zb.group.position.z - p.z)), -0.3);
+  });
+  await shot('05l-zombie.png');
+  const zk0 = await zstate();
+  await kick(0, -200, 'right');
+  await simulate(0.4);
+  const zk1 = await zstate();
+  check(zk1.state === 'down' && zk1.knocked === zk0.knocked + 1, `a kick knocks the zombie over (${zk1.state})`);
+  await simulate(4);
+  const zk2 = await zstate();
+  check(zk2.hits === zk1.hits, `a zombie that was kicked over hits nobody (${zk2.hits - zk1.hits} hits)`);
+  await simulate(0.2);
+  await shot('05m-zombie-down.png');
+
   // Back to the state the storm checks below expect: player at 300 m, apple far ahead.
   await page.evaluate(() => window.__appleKicker.teleport(300));
   await placeApple(375);
@@ -636,7 +755,7 @@ try {
     const k = Math.floor(g.p / 1000);
     perSection[k] = (perSection[k] ?? 0) + 1;
   }
-  check(gorges.length > 0 && Object.keys(perSection).every((k) => k % 4 === 1 && perSection[k] <= 2), `gorges only in Greece, at most two per section (${JSON.stringify(perSection)})`);
+  check(gorges.length > 0 && Object.keys(perSection).every((k) => k % 5 === 1 && perSection[k] <= 2), `gorges only in Greece, at most two per section (${JSON.stringify(perSection)})`);
   const gz = gorges[0];
   const onBridge = (g, x, p, yaw = 0) =>
     page.evaluate(([g, x, p, yaw]) => {

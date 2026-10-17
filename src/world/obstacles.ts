@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { CamelFactory, type Camel } from '../entities/camel';
 import { GnomeFactory, type Gnome } from '../entities/gnome';
+import { ZombieFactory, type Zombie } from '../entities/zombie';
 import { lerp, smoothstep } from '../utils/math';
 import { mulberry32, rand, subSeed, type Rng } from '../utils/noise';
 import { ColliderStore, SURFACES, type Surface } from './colliders';
@@ -14,11 +15,15 @@ export type ObstacleKind =
   // Desert
   | 'camel' | 'blocks' | 'column' | 'basalt' | 'drift'
   // Antarctica
-  | 'ice' | 'ridge' | 'snowdrift' | 'icepatch' | 'pebbles';
+  | 'ice' | 'ridge' | 'snowdrift' | 'icepatch' | 'pebbles'
+  // Town
+  | 'car' | 'barrier' | 'cones' | 'pothole' | 'rubble' | 'zombie';
 
 const WALL_COLORS = [0xbdb4a2, 0xa99f8c, 0xcfc6b2, 0x9a907e, 0xb5a088].map((h) => new THREE.Color(h));
 const SANDSTONE_COLORS = [0xd8b47a, 0xcda66a, 0xe0c08a, 0xc89c62].map((h) => new THREE.Color(h));
 const ICE_COLORS = [0xd8ecf8, 0xc4e2f4, 0xe6f2fa, 0xb4d8ee].map((h) => new THREE.Color(h));
+/** Faded paint of the old cars. */
+const CAR_PAINT = [0x6f8aa0, 0x8a9a6a, 0xc9c6b8, 0x9a3a2e, 0x4f6b5a, 0xb8a46a, 0x5a5f6a];
 
 /**
  * Obstacles lie across the track and get denser and bigger with distance.
@@ -57,6 +62,24 @@ export class Obstacles {
   private readonly driftSnowMat = new THREE.MeshLambertMaterial({ color: 0xf6f9fc });
   private readonly glazeMat = new THREE.MeshPhongMaterial({ color: 0xa9cfe8, specular: 0xffffff, shininess: 120, transparent: true, opacity: 0.85 });
   private readonly darkStoneMat = new THREE.MeshLambertMaterial({ color: 0x3e3530, flatShading: true });
+  // Town: wrecked cars, red and white barriers, traffic cones, bricks.
+  private readonly carPaintMats = CAR_PAINT.map((c) => new THREE.MeshLambertMaterial({ color: c, flatShading: true }));
+  private readonly glassMat = new THREE.MeshLambertMaterial({ color: 0x2b3238, flatShading: true });
+  private readonly rustMat = new THREE.MeshLambertMaterial({ color: 0x7a4a2c, flatShading: true });
+  private readonly tyreMat = new THREE.MeshLambertMaterial({ color: 0x222222, flatShading: true });
+  private readonly trimMat = new THREE.MeshLambertMaterial({ color: 0x4a4a48, flatShading: true });
+  private readonly lampMat = new THREE.MeshLambertMaterial({ color: 0xd8d6c8, flatShading: true });
+  private readonly tailMat = new THREE.MeshLambertMaterial({ color: 0x8a1e1a, flatShading: true });
+  private readonly redMat = new THREE.MeshLambertMaterial({ color: 0xc8261e, flatShading: true });
+  private readonly whiteMat = new THREE.MeshLambertMaterial({ color: 0xeeeee6, flatShading: true });
+  private readonly coneMat = new THREE.MeshLambertMaterial({ color: 0xf0661e, flatShading: true });
+  private readonly brickMat = new THREE.MeshLambertMaterial({ color: 0x8e4c38, flatShading: true });
+  private readonly concreteMat = new THREE.MeshLambertMaterial({ color: 0x9a9890, flatShading: true });
+  private readonly wheelGeo = new THREE.CylinderGeometry(0.3, 0.3, 0.2, 10).rotateZ(Math.PI / 2);
+  private readonly coneGeo = new THREE.ConeGeometry(0.16, 0.5, 10).translate(0, 0.25, 0);
+  private readonly zombieFactory = new ZombieFactory();
+  /** Zombies per chunk; the game moves them. */
+  readonly zombies = new Map<number, Zombie[]>();
   private readonly camelFactory = new CamelFactory();
   /** Camels per chunk; the game animates them. */
   readonly camels = new Map<number, Camel[]>();
@@ -73,6 +96,11 @@ export class Obstacles {
 
   dispose(): void {
     for (const m of [this.rootMat, this.branchMat, this.logMat, this.logEndMat, this.stoneMat, this.puddleMat, this.limeMat, this.wallMat, this.sandMat, this.sandstoneMat, this.basaltMat, this.driftMat, this.steelMat, this.plankMat, this.plankDarkMat, this.iceMat, this.snowMat, this.driftSnowMat, this.glazeMat, this.darkStoneMat]) m.dispose();
+    for (const m of [...this.carPaintMats, this.glassMat, this.rustMat, this.tyreMat, this.trimMat, this.lampMat, this.tailMat, this.redMat, this.whiteMat, this.coneMat, this.brickMat, this.concreteMat]) m.dispose();
+    this.wheelGeo.dispose();
+    this.coneGeo.dispose();
+    this.zombieFactory.dispose();
+    this.zombies.clear();
     this.camelFactory.dispose();
     this.camels.clear();
     this.gnomeFactory.dispose();
@@ -90,7 +118,15 @@ export class Obstacles {
 
   private pickKind(p: number, rng: Rng): ObstacleKind {
     const land = landscapeAt(p);
-    const weights: Array<[ObstacleKind, number]> = land === 'antarctic' ? [
+    const weights: Array<[ObstacleKind, number]> = land === 'town' ? [
+      ['car', 1.0],
+      ['barrier', 0.9],
+      ['cones', 0.7],
+      ['pothole', 0.6],
+      ['rubble', 0.6],
+      // A bit more often than the gnomes in the forest.
+      ['zombie', 0.6],
+    ] : land === 'antarctic' ? [
       ['ice', 1.0],
       ['ridge', 1.0],
       ['snowdrift', 0.7],
@@ -142,6 +178,7 @@ export class Obstacles {
     const slot = (p1 - p0) / n;
     let camelPlaced = false;
     let gnomePlaced = false;
+    let zombiePlaced = false;
     for (let k = 0; k < n; k++) {
       const p = p0 + slot * (k + 0.15 + rng() * 0.7);
       // Keep obstacles off very steep bits of track, and off the bridges and their approaches.
@@ -160,6 +197,10 @@ export class Obstacles {
       // At most one gnome per chunk.
       if (kind === 'gnome' && gnomePlaced) kind = 'root';
       if (kind === 'gnome') gnomePlaced = true;
+      // At most one zombie per chunk, too.
+      if (kind === 'zombie' && zombiePlaced) kind = 'rubble';
+      if (kind === 'zombie') zombiePlaced = true;
+      if (kind === 'barrier' && this.terrain.pathSlope(p) < -0.08) kind = 'cones';
       switch (kind) {
         case 'root': this.addRoot(group, i, p, rng); break;
         case 'branch': this.addBranch(group, i, p, rng); break;
@@ -182,6 +223,12 @@ export class Obstacles {
         // Glassy ice: the apple slides on further than on the packed snow.
         case 'icepatch': this.addPuddle(group, i, p, rng, this.glazeMat, -0.5); break;
         case 'pebbles': this.addScree(group, i, p, rng, this.darkStoneMat); break;
+        case 'car': this.addCar(group, i, p, rng); break;
+        case 'barrier': this.addBarrier(group, i, p, rng); break;
+        case 'cones': this.addCones(group, i, p, rng); break;
+        case 'pothole': this.addPuddle(group, i, p, rng); break;
+        case 'rubble': this.addScree(group, i, p, rng, rng() < 0.6 ? this.brickMat : this.concreteMat); break;
+        case 'zombie': this.addZombie(group, i, p, rng); break;
       }
     }
     return group;
@@ -630,7 +677,204 @@ export class Obstacles {
     this.colliders.add(chunk, { kind: 'capsule', ax, ay, az, bx, by, bz, r: radius, surface: SURFACES.stone, blocksPlayer: false });
   }
 
-  /** Forget the camels of a chunk that is being removed. */
+  // ---------------------------------------------------------------------------
+  // Town
+
+  /**
+   * A wrecked old saloon car standing on one half of the road: flat tyre,
+   * rust, dull glass. It blocks the player; the apple bounces off it.
+   */
+  private addCar(group: THREE.Group, chunk: number, p: number, rng: Rng): void {
+    const side = rng() < 0.5 ? -1 : 1;
+    const cx = this.terrain.pathCenterX(p) + side * rand(rng, 1.3, 1.7);
+    const cz = -p;
+    const yaw = this.terrain.pathHeading(p) + rand(rng, -0.25, 0.25) + (rng() < 0.5 ? Math.PI : 0);
+    const car = new THREE.Group();
+    car.position.set(cx, this.terrain.groundHeight(cx, cz), cz);
+    car.rotation.set(rand(rng, -0.04, 0.04), yaw, rand(rng, -0.05, 0.05), 'YXZ');
+    group.add(car);
+    const box = (mat: THREE.Material, x: number, y: number, z: number, sx: number, sy: number, sz: number, rx = 0, rz = 0): void => {
+      const m = new THREE.Mesh(this.wallStoneGeo, mat);
+      m.position.set(x, y, z);
+      m.scale.set(sx, sy, sz);
+      m.rotation.set(rx, 0, rz);
+      m.castShadow = true;
+      m.receiveShadow = true;
+      car.add(m);
+    };
+    const L = rand(rng, 3.9, 4.3);
+    const W = 1.64;
+    const paint = this.carPaintMats[Math.floor(rng() * this.carPaintMats.length)];
+    // One wheel is gone: the car sags onto that corner.
+    const missing = Math.floor(rng() * 4);
+    const sag = 0.16;
+    const sagX = missing % 2 === 0 ? -1 : 1;
+    const sagZ = missing < 2 ? 1 : -1;
+    car.rotation.z += sagX * 0.07;
+    car.rotation.x += -sagZ * 0.035;
+    car.position.y -= sag * 0.5;
+    // Lower body, a slightly narrower cabin with glass all round, a flat roof.
+    box(paint, 0, 0.62, 0, W, 0.6, L);
+    box(paint, 0, 0.94, L * 0.33, W - 0.06, 0.06, L * 0.3, -0.04);
+    box(this.glassMat, 0, 1.16, -0.15, W - 0.12, 0.42, 1.95);
+    box(paint, 0, 1.4, -0.2, W - 0.1, 0.07, 1.75);
+    for (const sx of [-1, 1]) for (const pz of [-0.95, 0, 0.75]) box(paint, sx * (W / 2 - 0.08), 1.16, pz, 0.06, 0.44, 0.09);
+    // Bumpers, lights.
+    for (const e of [-1, 1]) {
+      box(this.trimMat, 0, 0.42, e * (L / 2 + 0.04), W + 0.04, 0.14, 0.1);
+      for (const sx of [-1, 1]) box(e > 0 ? this.lampMat : this.tailMat, sx * 0.55, 0.7, e * (L / 2 + 0.005), 0.28, 0.14, 0.02);
+    }
+    // Rust along the sills and the odd patch on the wings.
+    for (const sx of [-1, 1]) {
+      box(this.rustMat, sx * (W / 2 + 0.005), 0.4, rand(rng, -0.6, 0.6), 0.02, 0.14, L * rand(rng, 0.4, 0.8));
+      if (rng() < 0.7) box(this.rustMat, sx * (W / 2 + 0.006), rand(rng, 0.55, 0.8), rand(rng, -1.6, 1.6), 0.02, rand(rng, 0.12, 0.25), rand(rng, 0.2, 0.5));
+    }
+    if (rng() < 0.6) box(this.rustMat, rand(rng, -0.4, 0.4), 0.93, rand(rng, -1.6, 1.6), rand(rng, 0.3, 0.6), 0.02, rand(rng, 0.2, 0.5));
+    // Wheels; the missing one leaves the brake drum on the ground.
+    for (let k = 0; k < 4; k++) {
+      const wx = (k % 2 === 0 ? -1 : 1) * (W / 2 - 0.1);
+      const wz = (k < 2 ? 1 : -1) * (L / 2 - 0.75);
+      if (k === missing) {
+        box(this.trimMat, wx, 0.12, wz, 0.18, 0.24, 0.24);
+        continue;
+      }
+      const w = new THREE.Mesh(this.wheelGeo, this.tyreMat);
+      w.position.set(wx, 0.3, wz);
+      w.castShadow = true;
+      car.add(w);
+    }
+    // Colliders: two capsules along the body, one for the cabin.
+    car.updateMatrixWorld(true);
+    const v = new THREE.Vector3();
+    const at = (x: number, y: number, z: number): THREE.Vector3 => car.localToWorld(v.set(x, y, z)).clone();
+    const add = (a: THREE.Vector3, b: THREE.Vector3, r: number): void => {
+      this.colliders.add(chunk, { kind: 'capsule', ax: a.x, ay: a.y, az: a.z, bx: b.x, by: b.y, bz: b.z, r, surface: SURFACES.metal, blocksPlayer: true });
+    };
+    for (const sx of [-0.38, 0.38]) add(at(sx, 0.62, -L / 2 + 0.45), at(sx, 0.62, L / 2 - 0.45), 0.45);
+    add(at(0, 1.15, -0.95), at(0, 1.15, 0.55), 0.38);
+  }
+
+  /**
+   * A red and white road barrier across part of the road: two striped boards
+   * on trestles. The low board stops a rolling apple (chip it over); the
+   * player walks round the end.
+   */
+  private addBarrier(group: THREE.Group, chunk: number, p: number, rng: Rng): void {
+    const length = rand(rng, 2.0, 2.6);
+    const cx = this.terrain.pathCenterX(p) + (rng() < 0.5 ? -1 : 1) * rand(rng, 0.25, 0.9);
+    const angle = this.terrain.pathHeading(p) + rand(rng, -0.2, 0.2); // across the road
+    const dirX = Math.cos(angle);
+    const dirZ = -Math.sin(angle);
+    const ax = cx - (dirX * length) / 2;
+    const az = -p - (dirZ * length) / 2;
+    const bx = cx + (dirX * length) / 2;
+    const bz = -p + (dirZ * length) / 2;
+    const ga = this.terrain.groundHeight(ax, az);
+    const gb = this.terrain.groundHeight(bx, bz);
+    const boards: Array<[number, number, number]> = [[0.27, 0.2, 0.11], [0.88, 0.17, 0.09]];
+    const stripe = 0.32;
+    const n = Math.max(2, Math.round(length / stripe));
+    const total = n * boards.length;
+    const mesh = new THREE.InstancedMesh(this.wallStoneGeo, this.wallMat, total);
+    const m = new THREE.Matrix4();
+    const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, angle, 0));
+    const pos = new THREE.Vector3();
+    const scl = new THREE.Vector3();
+    const red = new THREE.Color(0xc8261e);
+    const white = new THREE.Color(0xeeeee6);
+    let k = 0;
+    for (const [hy, hh] of boards) {
+      for (let j = 0; j < n; j++) {
+        const t = (j + 0.5) / n;
+        pos.set(ax + (bx - ax) * t, ga + (gb - ga) * t + hy, az + (bz - az) * t);
+        scl.set(length / n + 0.002, hh, 0.04);
+        m.compose(pos, q, scl);
+        mesh.setMatrixAt(k, m);
+        mesh.setColorAt(k, (j + Math.round(hy * 10)) % 2 === 0 ? red : white);
+        k++;
+      }
+    }
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    mesh.computeBoundingSphere();
+    group.add(mesh);
+    // Trestles at both ends: two splayed legs each.
+    for (const [ex, ez, gy] of [[ax + dirX * 0.15, az + dirZ * 0.15, ga], [bx - dirX * 0.15, bz - dirZ * 0.15, gb]]) {
+      for (const s of [-1, 1]) {
+        const leg = new THREE.Mesh(this.wallStoneGeo, this.whiteMat);
+        leg.position.set(ex, gy + 0.5, ez);
+        leg.scale.set(0.05, 1.04, 0.05);
+        leg.rotation.set(0, angle, 0);
+        leg.rotateX(s * 0.22);
+        leg.castShadow = true;
+        group.add(leg);
+        const foot = new THREE.Mesh(this.wallStoneGeo, this.redMat);
+        foot.position.set(ex - dirZ * s * 0.12, gy + 0.03, ez + dirX * s * 0.12);
+        foot.scale.set(0.12, 0.06, 0.3);
+        foot.rotation.y = angle;
+        group.add(foot);
+      }
+      this.colliders.add(chunk, { kind: 'cylinder', x: ex, z: ez, r: 0.12, yTop: gy + 1.0, surface: SURFACES.wood, blocksPlayer: true });
+    }
+    for (const [hy, , r] of boards) {
+      this.colliders.add(chunk, { kind: 'capsule', ax, ay: ga + hy, az, bx, by: gb + hy, bz, r, surface: SURFACES.wood, blocksPlayer: true });
+    }
+  }
+
+  /** A row of traffic cones across the road: they knock the apple off line. */
+  private addCones(group: THREE.Group, chunk: number, p: number, rng: Rng): void {
+    const cx = this.terrain.pathCenterX(p);
+    const angle = this.terrain.pathHeading(p) + rand(rng, -0.4, 0.4);
+    const dirX = Math.cos(angle);
+    const dirZ = -Math.sin(angle);
+    const count = 3 + Math.floor(rng() * 3);
+    const gap = rand(rng, 0.7, 0.95);
+    const d0 = rand(rng, -0.5, 0.5) - ((count - 1) * gap) / 2;
+    for (let k = 0; k < count; k++) {
+      const x = cx + dirX * (d0 + k * gap) + rand(rng, -0.08, 0.08);
+      const z = -p + dirZ * (d0 + k * gap) + rand(rng, -0.08, 0.08);
+      const y = this.terrain.groundHeight(x, z);
+      const fallen = rng() < 0.15;
+      const cone = new THREE.Group();
+      cone.position.set(x, y, z);
+      group.add(cone);
+      const body = new THREE.Mesh(this.coneGeo, this.coneMat);
+      body.castShadow = true;
+      cone.add(body);
+      const band = new THREE.Mesh(this.wallStoneGeo, this.whiteMat);
+      band.position.y = 0.3;
+      band.scale.set(0.15, 0.07, 0.15);
+      band.rotation.y = Math.PI / 4;
+      cone.add(band);
+      const base = new THREE.Mesh(this.wallStoneGeo, this.coneMat);
+      base.position.y = 0.02;
+      base.scale.set(0.38, 0.04, 0.38);
+      cone.add(base);
+      if (fallen) {
+        // Knocked over, lying across the road.
+        cone.rotation.set(Math.PI / 2 - 0.1, rng() * 6.28, 0, 'YXZ');
+        cone.position.y += 0.16;
+        continue;
+      }
+      cone.rotation.y = rng() * 6.28;
+      this.colliders.add(chunk, { kind: 'cylinder', x, z, r: 0.15, yTop: y + 0.5, surface: SURFACES.post, blocksPlayer: false });
+    }
+  }
+
+  /** A zombie shambling about on the road (no collider: it walks, follows the player and hits). */
+  private addZombie(group: THREE.Group, chunk: number, p: number, rng: Rng): void {
+    const x = this.terrain.pathCenterX(p) + rand(rng, -1.5, 1.5);
+    const z = -p;
+    const zombie = this.zombieFactory.build(x, this.terrain.groundHeight(x, z), z, rng);
+    group.add(zombie.group);
+    let list = this.zombies.get(chunk);
+    if (!list) {
+      list = [];
+      this.zombies.set(chunk, list);
+    }
+    list.push(zombie);
+  }
+
   /**
    * The steel truss bridge over a gorge. The railing is open below its middle
    * rail, so a sideways kick sends the apple down into the gorge; invisible
@@ -708,6 +952,8 @@ export class Obstacles {
     this.camels.delete(i);
     for (const g of this.gnomes.get(i) ?? []) g.removed = true;
     this.gnomes.delete(i);
+    for (const zb of this.zombies.get(i) ?? []) zb.removed = true;
+    this.zombies.delete(i);
   }
 
   static disposeGroup(group: THREE.Group): void {

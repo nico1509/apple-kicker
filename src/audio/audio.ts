@@ -206,6 +206,38 @@ export class AudioEngine {
     this.burst(0.9, 0.22, 'lowpass', 380, 0.5);
   }
 
+  /** A hoarse, rattling moan: a zombie drawing back to hit. */
+  groan(): void {
+    if (!this.ctx || !this.master) return;
+    const ctx = this.ctx;
+    const t = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(118, t);
+    osc.frequency.linearRampToValueAtTime(150, t + 0.3);
+    osc.frequency.exponentialRampToValueAtTime(82, t + 0.8);
+    // A slow wobble makes it rattle.
+    const lfo = ctx.createOscillator();
+    lfo.frequency.value = 23;
+    const lfoGain = ctx.createGain();
+    lfoGain.gain.value = 14;
+    lfo.connect(lfoGain).connect(osc.frequency);
+    const flt = ctx.createBiquadFilter();
+    flt.type = 'bandpass';
+    flt.frequency.value = 600;
+    flt.Q.value = 1.4;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.28, t + 0.1);
+    g.gain.exponentialRampToValueAtTime(0.0005, t + 0.85);
+    osc.connect(flt).connect(g).connect(this.master);
+    osc.start(t);
+    lfo.start(t);
+    osc.stop(t + 0.9);
+    lfo.stop(t + 0.9);
+    this.burst(0.5, 0.08, 'bandpass', 900, 2);
+  }
+
   /** Ice cracking out of the ground. */
   iceCrack(): void {
     this.burst(0.12, 0.3, 'highpass', 3200, 1.2);

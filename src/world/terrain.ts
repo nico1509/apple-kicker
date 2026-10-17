@@ -17,7 +17,8 @@ export type BiomeType =
   | 'forest' | 'meadow' | 'field' | 'vineyard' | 'hedge'
   | 'phrygana' | 'olive' | 'stubble' | 'farmstead'
   | 'dunes' | 'oasis' | 'ruins' | 'blackdesert'
-  | 'snowfield' | 'shore' | 'rookery';
+  | 'snowfield' | 'shore' | 'rookery'
+  | 'townhouses' | 'gardens' | 'fallow';
 export type Side = -1 | 1;
 
 export interface BiomeMix {
@@ -41,6 +42,7 @@ const SLOPE_BIAS: Record<BiomeType, number> = {
   phrygana: 0.14, olive: 0.09, stubble: -0.02, farmstead: 0.02,
   dunes: 0.04, oasis: -0.03, ruins: 0.03, blackdesert: 0.02,
   snowfield: 0.06, shore: -0.16, rookery: 0.1,
+  townhouses: 0, gardens: 0.03, fallow: 0.04,
 };
 /** Rolling resistance (m/s²) of the ground beside the lane. */
 const ROLL_RES: Record<BiomeType, number> = {
@@ -48,6 +50,7 @@ const ROLL_RES: Record<BiomeType, number> = {
   phrygana: 2.4, olive: 2.0, stubble: 2.8, farmstead: 1.9,
   dunes: 3.4, oasis: 2.2, ruins: 2.4, blackdesert: 2.6,
   snowfield: 3.0, shore: 2.8, rookery: 2.4,
+  townhouses: 1.3, gardens: 2.1, fallow: 2.4,
 };
 const BIOME_WEIGHTS: Record<Landscape, Array<[BiomeType, number]>> = {
   forest: [
@@ -74,7 +77,25 @@ const BIOME_WEIGHTS: Record<Landscape, Array<[BiomeType, number]>> = {
     ['shore', 0.34],
     ['rookery', 0.26],
   ],
+  town: [
+    ['townhouses', 0.38],
+    ['gardens', 0.36],
+    ['fallow', 0.26],
+  ],
 };
+/**
+ * In the small town the track is an asphalt road: wider than the dirt track,
+ * with a kerb at its edges.
+ */
+export const ROAD = {
+  /** Half width of the asphalt. */
+  half: 2.7,
+  /** The kerb rises this much over 0.3 m beyond the asphalt. */
+  kerb: 0.12,
+  /** Rolling resistance (m/s²) of the asphalt. */
+  roll: 0.7,
+} as const;
+
 /** In Antarctica the sea lies this far below the lowest bit of track nearby. */
 const SEA_BELOW = 1.6;
 const SEA_CELL = 20;
@@ -392,13 +413,20 @@ export class Terrain {
     return clamp(base + lerp(SLOPE_BIAS[mix.a], SLOPE_BIAS[mix.b], mix.t), -0.2, 0.22);
   }
 
-  /** Cross-section of the track: two shallow wheel ruts, a crown and raised verges. */
-  private crossSection(d: number): number {
+  /**
+   * Cross-section of the track: two shallow wheel ruts, a crown and raised verges.
+   * In the town (weight `town`) it turns into a cambered road with kerbs.
+   */
+  private crossSection(d: number, town = 0): number {
     const ad = Math.abs(d);
     const rut = -0.045 * Math.exp(-(((ad - CFG.path.rutCenter) / 0.24) ** 2));
     const crown = ad < CFG.path.halfWidth ? 0.035 * (1 - (ad / CFG.path.halfWidth) ** 2) : 0;
     const verge = 0.1 * smoothstep(CFG.path.halfWidth, 2.8, ad);
-    return rut + crown + verge;
+    const track = rut + crown + verge;
+    if (town <= 0) return track;
+    const camber = ad < ROAD.half ? 0.04 * (1 - (ad / ROAD.half) ** 2) : 0;
+    const road = camber + ROAD.kerb * smoothstep(ROAD.half, ROAD.half + 0.3, ad);
+    return lerp(track, road, town);
   }
 
   groundHeight(x: number, z: number): number {
@@ -424,11 +452,13 @@ export class Terrain {
     // so the deck continues it without a step. The visible ground stays a little
     // below the planks.
     const ruts = gorge ? smoothstep(GORGE.deckHalfLen, GORGE.deckHalfLen + 2.5, Math.abs(-z - gorge.p)) : 1;
-    let h = pathH + this.crossSection(d) * ruts + GORGE.lift * (1 - ruts) * (deck ? 1 : 0.5);
-    const dd = Math.max(0, ad - CFG.path.halfWidth);
-    h += slope * Math.min(dd, 45);
-    h += 0.9 * fbm2(x * 0.07, z * 0.07, s + 21, 3) * smoothstep(1.7, 6, ad);
-    h += 6 * fbm2(x * 0.012 + 3, z * 0.012, s + 23, 3) * smoothstep(9, 40, ad);
+    // The town is flatter: the ground beside the road only starts to tilt and roll behind the kerb.
+    const tw = landscapeWeight(-z, 'town');
+    let h = pathH + this.crossSection(d, tw) * ruts + GORGE.lift * (1 - ruts) * (deck ? 1 : 0.5);
+    const dd = Math.max(0, ad - lerp(CFG.path.halfWidth, ROAD.half + 0.3, tw));
+    h += slope * (1 - 0.5 * tw) * Math.min(dd, 45);
+    h += 0.9 * (1 - 0.6 * tw) * fbm2(x * 0.07, z * 0.07, s + 21, 3) * smoothstep(1.7 + 2 * tw, 6 + 3 * tw, ad);
+    h += 6 * (1 - 0.4 * tw) * fbm2(x * 0.012 + 3, z * 0.012, s + 23, 3) * smoothstep(9, 40, ad);
     const w = ad > 4 ? landscapeWeight(-z, 'desert') : 0;
     if (w > 0) {
       // Sand dunes beside the track: sharp crests across the wind.
@@ -487,12 +517,17 @@ export class Terrain {
     const ad = Math.abs(d);
     // The bridge planks are smooth.
     if (this.onBridge(x, z)) return 0.9;
+    let r: number;
     if (ad < CFG.path.halfWidth) {
       const rut = Math.exp(-(((ad - CFG.path.rutCenter) / 0.3) ** 2));
-      return lerp(1.5, 0.75, rut);
+      r = lerp(1.5, 0.75, rut);
+    } else {
+      const mix = this.biomeMix(p, d < 0 ? -1 : 1);
+      r = lerp(ROLL_RES[mix.a], ROLL_RES[mix.b], mix.t);
     }
-    const mix = this.biomeMix(p, d < 0 ? -1 : 1);
-    return lerp(ROLL_RES[mix.a], ROLL_RES[mix.b], mix.t);
+    // Smooth asphalt in the town.
+    if (ad < ROAD.half) r = lerp(r, ROAD.roll, landscapeWeight(p, 'town'));
+    return r;
   }
 
   // ---------------------------------------------------------------------------
@@ -558,6 +593,20 @@ export class Terrain {
     sea: new THREE.Color(0x3c6a8c),
     seaDeep: new THREE.Color(0x2f5878),
     floe: new THREE.Color(0xe6eef5),
+    // The small town in winter.
+    asphalt: new THREE.Color(0x4a4c4f),
+    asphaltDark: new THREE.Color(0x3c3e41),
+    asphaltPatch: new THREE.Color(0x2f3134),
+    asphaltPale: new THREE.Color(0x606264),
+    paving: new THREE.Color(0x8a8984),
+    pavingDark: new THREE.Color(0x74736d),
+    deadGrass: new THREE.Color(0x857a52),
+    deadGrassDark: new THREE.Color(0x645d40),
+    winterGreen: new THREE.Color(0x5d6a3c),
+    wetSoil: new THREE.Color(0x4f4436),
+    gravel: new THREE.Color(0x7a746a),
+    farTown: new THREE.Color(0x77704f),
+    farTownDark: new THREE.Color(0x5a5045),
   };
 
   private readonly tmpA = new THREE.Color();
@@ -661,6 +710,29 @@ export class Terrain {
         this.tmpB.copy(P.darkRock).lerp(P.rockBrown, smoothstep(0.2, 0.7, valueNoise2(x * 0.3, z * 0.3, s + 63)) * 0.7);
         return out.copy(P.snow).lerp(P.snowShade, smoothstep(-0.3, 0.4, n) * 0.5).lerp(this.tmpB, bare);
       }
+      case 'townhouses': {
+        // A paved pavement in front of the houses, gravel and trodden yards behind it.
+        if (ad < ROAD.half + 2.4) {
+          const slab = hash3(Math.floor(x * 1.1), Math.floor(z * 1.1), s + 81);
+          return out.copy(P.paving).lerp(P.pavingDark, slab * 0.6 + 0.2 * n);
+        }
+        out.copy(P.gravel).lerp(P.wetSoil, smoothstep(-0.2, 0.5, n) * 0.6);
+        return out.lerp(P.deadGrass, smoothstep(0.2, 0.7, valueNoise2(x * 0.1, z * 0.1, s + 83)) * 0.6);
+      }
+      case 'gardens': {
+        // Winter grass round the houses, dug-over vegetable beds further back.
+        out.copy(P.winterGreen).lerp(P.deadGrass, smoothstep(-0.3, 0.4, n) * 0.75);
+        if (ad > 18 && ad < 34) {
+          const bed = 0.5 + 0.5 * Math.sin(d * 1.4 + 0.3 * Math.sin(p * 0.04));
+          out.lerp(P.wetSoil, smoothstep(0.1, 0.5, valueNoise2(x * 0.04, z * 0.04, s + 85)) * (0.4 + 0.4 * bed));
+        }
+        return out;
+      }
+      case 'fallow': {
+        // Brown, dead grass with muddy patches.
+        out.copy(P.deadGrass).lerp(P.deadGrassDark, smoothstep(-0.2, 0.5, n) * 0.8);
+        return out.lerp(P.wetSoil, smoothstep(0.55, 0.8, valueNoise2(x * 0.15, z * 0.15, s + 87)) * 0.7);
+      }
     }
   }
 
@@ -689,6 +761,7 @@ export class Terrain {
     const g = landscapeWeight(p, 'greece');
     const w = landscapeWeight(p, 'desert');
     const an = landscapeWeight(p, 'antarctic');
+    const tw = landscapeWeight(p, 'town');
 
     if (ax > CFG.chunk.halfWidth - 2) {
       const far = ax - CFG.chunk.halfWidth;
@@ -712,6 +785,11 @@ export class Terrain {
         this.tmpA.copy(P.snow).lerp(P.snowBlue, smoothstep(-0.3, 0.5, v) * 0.6);
         this.tmpA.lerp(P.darkRock, smoothstep(0.62, 0.8, valueNoise2(x * 0.02, z * 0.035, s + 65)) * smoothstep(135, 185, far) * 0.85);
         out.lerp(this.tmpA, an);
+      }
+      if (tw > 0) {
+        // Brown winter fields and leafless woods.
+        this.tmpA.copy(P.farTown).lerp(P.farTownDark, smoothstep(-0.3, 0.4, v));
+        out.lerp(this.tmpA, tw);
       }
       // Blend into the detailed terrain colour.
       if (far < 0) {
@@ -744,7 +822,7 @@ export class Terrain {
     }
 
     // Leaf-litter freckles on the track in autumn, pale gravel in Greece, light sand in the desert.
-    if (ad < 2.4 && hash3(Math.floor(x * 2), Math.floor(z * 2), s + 61) > 0.9) {
+    if (ad < 2.4 && hash3(Math.floor(x * 2), Math.floor(z * 2), s + 61) > 0.9 + 0.1 * tw) {
       out.lerp(this.tmpA.setHex(0xb07a3a).lerp(P.dryGrassPale, g).lerp(P.sandLight, w).lerp(P.snow, an), 0.3);
     }
     return out;
@@ -754,6 +832,23 @@ export class Terrain {
 
   /** g, w, an: weights of the Greek, the desert and the Antarctic landscape (0..1) for the colours of the track and verge. */
   private groundColorInner(p: number, d: number, x: number, z: number, mix: BiomeMix, g: number, w: number, an: number, out: THREE.Color): THREE.Color {
+    this.groundColorTrack(p, d, x, z, mix, g, w, an, out);
+    const tw = landscapeWeight(p, 'town');
+    const ad = Math.abs(d);
+    if (tw <= 0 || ad > ROAD.half + 0.15) return out;
+    // The asphalt road of the town: worn grey with darker repair patches.
+    const P = Terrain.PAL;
+    const s = this.seed;
+    const n = fbm2(x * 0.3, z * 0.3, s + 89, 2);
+    const road = this.roadTmp.copy(P.asphalt).lerp(P.asphaltDark, smoothstep(-0.3, 0.5, n) * 0.7);
+    road.lerp(P.asphaltPale, smoothstep(0.45, 0.8, valueNoise2(x * 0.7, z * 0.25, s + 91)) * 0.4);
+    road.lerp(P.asphaltPatch, smoothstep(0.78, 0.84, valueNoise2(x * 0.18, z * 0.12, s + 93)) * 0.8);
+    return out.lerp(road, tw * (1 - smoothstep(ROAD.half - 0.1, ROAD.half + 0.15, ad)));
+  }
+
+  private readonly roadTmp = new THREE.Color();
+
+  private groundColorTrack(p: number, d: number, x: number, z: number, mix: BiomeMix, g: number, w: number, an: number, out: THREE.Color): THREE.Color {
     const P = Terrain.PAL;
     const ad = Math.abs(d);
     const s = this.seed;
