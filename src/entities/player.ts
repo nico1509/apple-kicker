@@ -83,6 +83,16 @@ export class Player {
     this.rig.name = 'player';
   }
 
+  /**
+   * Knocked breathless (a zombie's blow): all stamina is gone and the player has
+   * to catch their breath as after sprinting the bar empty.
+   */
+  loseBreath(): void {
+    this.stamina = 0;
+    this.sprinting = false;
+    this.exhausted = CFG.player.exhaustedSeconds;
+  }
+
   /** Push the player by (dx, dz) metres; applied smoothly over a few frames. */
   shove(dx: number, dz: number): void {
     this.shoveX += dx;

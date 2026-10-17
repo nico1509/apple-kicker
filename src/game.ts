@@ -7,6 +7,7 @@ import { GnomeBand, type Gnome } from './entities/gnome';
 import { IceMonster, RAGE_HALF_LENGTH } from './entities/icemonster';
 import { Input } from './entities/input';
 import { Player, type PlayerEvents } from './entities/player';
+import { ZombieHorde, type Zombie } from './entities/zombie';
 import { EASY_LIVES, Hud, type Cause, type Difficulty } from './ui/hud';
 import { clamp, lerp, smoothstep } from './utils/math';
 import { Storm } from './weather/storm';
@@ -56,6 +57,7 @@ export class Game {
   readonly spit: CamelSpit;
   readonly gnomeBand: GnomeBand;
   readonly iceMonster: IceMonster;
+  readonly zombieHorde: ZombieHorde;
   world: World;
   player!: Player;
   apple!: Apple;
@@ -87,6 +89,7 @@ export class Game {
   private tipObstacles = false;
   private tipStorm = false;
   private tipWhiff = false;
+  private tipZombie = false;
   private thirstWarned = false;
   private lastCause: Cause = 'player';
   /** Clock for the spinning bottles. */
@@ -144,6 +147,13 @@ export class Game {
         return world().colliders;
       },
       pathOffset: (x, z) => x - this.world.terrain.pathCenterX(-z),
+    });
+    this.zombieHorde = new ZombieHorde({
+      groundHeight: (x, z) => this.world.groundHeight(x, z),
+      get colliders() {
+        return world().colliders;
+      },
+      pathCenterX: (p) => this.world.terrain.pathCenterX(p),
     });
     this.iceMonster = new IceMonster(this.scene, {
       groundHeight: (x, z) => this.world.groundHeight(x, z),
@@ -215,7 +225,7 @@ export class Game {
     });
     this.scene.add(this.apple.mesh);
     this.player = new Player(this.world, this.input, this.playerEvents);
-    this.player.kickOverride = (foot) => this.kickGnome(foot);
+    this.player.kickOverride = (foot) => this.kickCreature(foot);
     this.scene.add(this.player.rig);
   }
 
@@ -233,6 +243,7 @@ export class Game {
     this.tipObstacles = false;
     this.tipStorm = false;
     this.tipWhiff = false;
+    this.tipZombie = false;
     this.hintFaded = false;
     this.player.update(0, this.apple, true);
     this.updateLighting();
@@ -481,6 +492,9 @@ export class Game {
     for (const g of this.gnomes()) {
       if (g.state !== 'down' && Math.abs(-g.group.position.z - (p + APPLE_AHEAD / 2)) < 8) return false;
     }
+    for (const zb of this.zombies()) {
+      if (zb.state !== 'down' && Math.abs(-zb.group.position.z - (p + APPLE_AHEAD / 2)) < 12) return false;
+    }
     if (this.iceMonster.active && Math.abs(this.iceMonster.progress - (p + APPLE_AHEAD / 2)) < RAGE_HALF_LENGTH + 10) return false;
     if (Math.abs(t.pathSlope(p)) > 0.08 || Math.abs(t.pathSlope(p + APPLE_AHEAD)) > 0.08) return false;
     for (let q = p - 1; q <= p + APPLE_AHEAD + 1.5; q += 0.25) {
@@ -623,6 +637,19 @@ export class Game {
         this.hud.message('Ein Wichtel hat deinen Apfel geklaut! Kick ihn um!', 2400, 'bad');
       },
     });
+    this.zombieHorde.update(dt, this.zombies(), this.apple, this.player, playing, {
+      onChase: () => {
+        if (this.tipZombie) return;
+        this.tipZombie = true;
+        this.hud.message('Ein Zombie! Kick ihn um, bevor er zuschlägt!', 2600, 'bad');
+      },
+      onWindup: () => this.audio.groan(),
+      onHit: () => {
+        this.player.loseBreath();
+        this.audio.hit(1.2);
+        this.hud.message('Ein Zombie hat dich erwischt! Keine Puste mehr …', 1800, 'bad');
+      },
+    });
     this.iceMonster.update(dt, this.player, this.apple, playing, {
       onAppear: () => {
         this.audio.roar();
@@ -694,22 +721,32 @@ export class Game {
   }
 
   /**
-   * A swing that reaches a gnome knocks it over (and frees a stolen apple).
-   * A free apple in reach of the foot is kicked as usual.
+   * A swing that reaches a gnome or a zombie knocks it over (and frees a
+   * stolen apple). A free apple in reach of the foot is kicked as usual.
    */
-  private kickGnome(foot: Foot): boolean {
+  private kickCreature(foot: Foot): boolean {
     if (!this.apple.held && this.player.appleInReach(this.apple, foot)) return false;
     const carried = this.apple.held;
     const g = this.gnomeBand.kick(this.gnomes(), this.player, this.apple);
-    if (!g) return false;
-    this.audio.kick(0.6);
-    this.audio.hit(1.4);
-    this.hud.message(carried ? 'Umgekickt! Der Wichtel lässt den Apfel fallen.' : 'Wichtel umgekickt!', 1600, 'good');
+    if (g) {
+      this.audio.kick(0.6);
+      this.audio.hit(1.4);
+      this.hud.message(carried ? 'Umgekickt! Der Wichtel lässt den Apfel fallen.' : 'Wichtel umgekickt!', 1600, 'good');
+      return true;
+    }
+    if (!this.zombieHorde.kick(this.zombies(), this.player)) return false;
+    this.audio.kick(0.7);
+    this.audio.hit(1.6);
+    this.hud.message('Zombie umgekickt!', 1400, 'good');
     return true;
   }
 
   private *gnomes(): Generator<Gnome> {
     for (const list of this.world.obstacles.gnomes.values()) yield* list;
+  }
+
+  private *zombies(): Generator<Zombie> {
+    for (const list of this.world.obstacles.zombies.values()) yield* list;
   }
 
   private *camels(): Generator<Camel> {
@@ -865,6 +902,11 @@ export class Game {
     return [...this.gnomes()].map((g) => ({ id: g.id, x: g.group.position.x, z: g.group.position.z, state: g.state, homeX: g.homeX, homeZ: g.homeZ }));
   }
 
+  /** Zombies in the generated chunks (testing only). */
+  debugZombies(): Array<{ id: number; x: number; z: number; state: string; cooldown: number }> {
+    return [...this.zombies()].map((zb) => ({ id: zb.id, x: zb.group.position.x, z: zb.group.position.z, state: zb.state, cooldown: zb.cooldown }));
+  }
+
   /** Gorges of the first landscape sections (testing only). */
   debugGorges(sections = 6): Array<{ p: number; x: number; h: number }> {
     const out: Array<{ p: number; x: number; h: number }> = [];
@@ -923,6 +965,9 @@ export class Game {
       appleHeld: this.apple.held,
       gnomeGrabs: this.gnomeBand.grabs,
       gnomeKnocked: this.gnomeBand.knocked,
+      zombieHits: this.zombieHorde.hits,
+      zombieSwings: this.zombieHorde.swings,
+      zombieKnocked: this.zombieHorde.knocked,
       holderX: this.gnomeBand.holder?.group.position.x ?? 0,
       holderZ: this.gnomeBand.holder?.group.position.z ?? 0,
       groundY: this.world.groundHeight(this.player.pos.x, this.player.pos.z),

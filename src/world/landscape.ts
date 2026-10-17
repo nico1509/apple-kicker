@@ -6,10 +6,10 @@ import { smoothstep } from '../utils/math';
  * Landscapes change every LANDSCAPE_LENGTH metres along the path and loop:
  * after the last one the first one (the autumn forest) comes back.
  */
-export type Landscape = 'forest' | 'greece' | 'desert' | 'antarctic';
+export type Landscape = 'forest' | 'greece' | 'desert' | 'antarctic' | 'town';
 
 export const LANDSCAPE_LENGTH = 1000;
-export const LANDSCAPES: readonly Landscape[] = ['forest', 'greece', 'desert', 'antarctic'];
+export const LANDSCAPES: readonly Landscape[] = ['forest', 'greece', 'desert', 'antarctic', 'town'];
 /** Half width (m) of the cross-fade of colours, light and backdrop at a landscape border. */
 const BLEND = 40;
 
@@ -122,6 +122,19 @@ export const ATMOSPHERES: Record<Landscape, Atmosphere> = {
     fogFar: 420,
     cirrus: 0.35,
     clouds: 0.3,
+  },
+  // A small town in winter without snow: an overcast grey sky and flat, cold light.
+  town: {
+    horizon: new THREE.Color(0xc3c8cd),
+    top: new THREE.Color(0x8794a3),
+    hemiSky: new THREE.Color(0xc9ced5),
+    hemiGround: new THREE.Color(0x5f5b4f),
+    sun: new THREE.Color(0xe6e8ee),
+    sunIntensity: 1.7,
+    fogNear: 60,
+    fogFar: 250,
+    cirrus: 0,
+    clouds: 1,
   },
 };
 
