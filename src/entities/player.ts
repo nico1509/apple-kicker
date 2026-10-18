@@ -386,7 +386,8 @@ export class Player {
     const dist = Math.hypot(rel.x, rel.z);
     if (dist > CFG.kick.reach || f < -0.2) return false;
     if (foot === 'left') return s > -1.15 && s < 0.6;
-    return s > -0.6 && s < 1.15;
+    // The right foot is the only one the player kicks with: it reaches across.
+    return s > -1.15 && s < 1.15;
   }
 
   private executeKick(k: KickState, apple: Apple): void {
@@ -406,9 +407,9 @@ export class Player {
       apple.pos.y += 0.25;
     }
     const dir = this.tmp2.set(dirX * Math.cos(elevation), Math.sin(elevation), dirZ * Math.cos(elevation)).normalize();
-    const curl = (k.foot === 'left' ? 1 : -1) * CFG.kick.curl * k.power;
     const extra = this.tmp.set(this.vel.x * 0.5, 0, this.vel.z * 0.5);
-    apple.kick(dir, speed, curl, extra);
+    // Only one foot kicks, so no side spin: it would bend every kick the same way.
+    apple.kick(dir, speed, 0, extra);
     this.events.onKick(k.power, k.chip, k.foot);
   }
 

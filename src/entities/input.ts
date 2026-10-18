@@ -19,9 +19,9 @@ export interface KickRequest {
 }
 
 /**
- * Keyboard + mouse input. Mouse movement rotates the view unless a mouse
- * button is held: then the movement is accumulated into a kick drag
- * (left button = left foot, right button = right foot).
+ * Keyboard + mouse input. Mouse movement rotates the view unless the left
+ * mouse button is held: then the movement is accumulated into a kick drag
+ * with the right foot.
  */
 export class Input {
   enabled = false;
@@ -38,9 +38,6 @@ export class Input {
     this.keys.add(e.code);
     if (!this.enabled) return;
     if (e.code === 'Tab' || e.code === 'Space' || e.code.startsWith('Arrow')) e.preventDefault();
-    if (e.repeat) return;
-    if (e.code === 'KeyQ') this.kicks.push({ foot: 'left', dx: 0, dy: 0, chip: this.keys.has('Space'), tap: true, lookAfter: 0 });
-    if (e.code === 'KeyE') this.kicks.push({ foot: 'right', dx: 0, dy: 0, chip: this.keys.has('Space'), tap: true, lookAfter: 0 });
   };
   private readonly onKeyUp = (e: KeyboardEvent): void => {
     this.keys.delete(e.code);
@@ -74,15 +71,13 @@ export class Input {
   };
   private readonly onMouseDown = (e: MouseEvent): void => {
     if (!this.enabled) return;
-    if (e.button !== 0 && e.button !== 2) return;
+    if (e.button !== 0) return;
     e.preventDefault();
     if (this.drag) return; // one kick at a time
-    this.drag = { foot: e.button === 0 ? 'left' : 'right', dx: 0, dy: 0 };
+    this.drag = { foot: 'right', dx: 0, dy: 0 };
   };
   private readonly onMouseUp = (e: MouseEvent): void => {
-    if (!this.drag) return;
-    const foot: Foot = e.button === 0 ? 'left' : 'right';
-    if (foot !== this.drag.foot) return;
+    if (!this.drag || e.button !== 0) return;
     e.preventDefault();
     this.release();
   };

@@ -1,5 +1,3 @@
-import type { Foot } from '../config';
-
 export type OverlayKind = 'start' | 'paused' | 'lifelost' | 'gameover' | 'won' | null;
 export type Difficulty = 'easy' | 'hard';
 /** Story: every landscape once, then the way ends. Endless: the landscapes loop (unlocked by finishing the story). */
@@ -103,8 +101,8 @@ export class Hud {
       <div class="bottom-stack">
         <div class="hint">
           <span><b>WASD</b> laufen</span><span><b>Shift</b> sprinten</span>
-          <span><b>Linke Maus</b> linker Fuß</span><span><b>Rechte Maus</b> rechter Fuß</span>
-          <span><b>Ziehen</b> = Richtung &amp; Kraft</span><span><b>Leertaste</b> halten = Lupfer</span>
+          <span><b>Maustaste</b> halten, ziehen, loslassen = Kick</span>
+          <span><b>Leertaste</b> halten = Lupfer</span>
         </div>
       </div>
       <div class="overlay" hidden><div class="overlay-content"></div></div>
@@ -260,7 +258,7 @@ export class Hud {
     this.vignette.style.opacity = String(Math.min(1, amount));
   }
 
-  setDrag(dx: number, dy: number, power: number, foot: Foot, chip: boolean, tap: boolean): void {
+  setDrag(dx: number, dy: number, power: number, chip: boolean, tap: boolean): void {
     if (!this.lastArrowVisible) {
       this.lastArrowVisible = true;
       this.arrow.hidden = false;
@@ -272,8 +270,7 @@ export class Hud {
     this.arrowLine.style.transform = `rotate(${angle}rad)`;
     const hue = 110 - power * 110;
     this.arrowLine.style.background = `linear-gradient(90deg, rgba(255,255,255,0.35), hsl(${hue} 90% 55%))`;
-    const footName = foot === 'left' ? 'Linker Fuß' : 'Rechter Fuß';
-    this.arrowLabel.textContent = tap ? `${footName} · Stupser` : `${footName} · ${Math.round(power * 100)} %${chip ? ' · Lupfer' : ''}`;
+    this.arrowLabel.textContent = tap ? 'Stupser' : `${Math.round(power * 100)} %${chip ? ' · Lupfer' : ''}`;
   }
 
   clearDrag(): void {
@@ -383,11 +380,10 @@ export class Hud {
       </div>
       <div class="controls">
         <div><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> laufen · <kbd>Shift</kbd> sprinten</div>
-        <div><kbd>Linke Maustaste</kbd> halten &amp; ziehen = Kick mit dem linken Fuß</div>
-        <div><kbd>Rechte Maustaste</kbd> halten &amp; ziehen = Kick mit dem rechten Fuß</div>
+        <div><kbd>Linke Maustaste</kbd> halten &amp; ziehen = Kick</div>
         <div>Zugrichtung = Schussrichtung, Zuglänge = Kraft · kurzer Klick = Stupser</div>
         <div><kbd>Leertaste</kbd> beim Loslassen halten = hoher Lupfer über Hindernisse</div>
-        <div><kbd>Q</kbd> / <kbd>E</kbd> = kurzer Stupser links / rechts · <kbd>M</kbd> Ton an/aus</div>
+        <div><kbd>M</kbd> Ton an/aus</div>
       </div>
       <p class="small">Der Mauszeiger wird im Spiel eingefangen · <kbd>Esc</kbd> oder <kbd>P</kbd> pausiert</p>
     `;

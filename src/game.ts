@@ -959,7 +959,7 @@ export class Game {
     if (drag && this.state === 'playing') {
       const tap = Math.hypot(drag.dx, drag.dy) < CFG.kick.tapThresholdPx;
       const { power } = Player.evalDrag(drag.dx, drag.dy, false);
-      hud.setDrag(drag.dx, drag.dy, power, drag.foot, this.input.isDown('Space'), tap);
+      hud.setDrag(drag.dx, drag.dy, power, this.input.isDown('Space'), tap);
     } else {
       hud.clearDrag();
     }
