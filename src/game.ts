@@ -43,8 +43,10 @@ const MODE_KEY = 'apple-kicker-mode';
 const UNLOCK_KEY = 'apple-kicker-endless-unlocked';
 /** Warm light inside the cabin at the end of the story. */
 const HOME_LIGHT = 26;
-/** The apple lies this far ahead of the player at the start and after a respawn. */
+/** At the start and after a respawn the apple lies this far ahead of the spawn point… */
 const APPLE_AHEAD = 1.2;
+/** …and the player stands this far behind it, so the apple is well in view at the bottom of the screen. */
+const PLAYER_BEHIND = 1.3;
 const SUN_DIR = new THREE.Vector3(0.55, 0.62, -0.5).normalize();
 const HORIZON_STORM = new THREE.Color(0x5f666f);
 const TOP_STORM = new THREE.Color(0x2e3540);
@@ -254,8 +256,7 @@ export class Game {
 
   private setupWorld(): void {
     this.world.prewarm(0);
-    this.player.reset(this.world.terrain.pathCenterX(0), 0, 0);
-    this.apple.reset(this.world.terrain.pathCenterX(APPLE_AHEAD), -APPLE_AHEAD);
+    this.placeOnPath(0);
     this.storm.reset();
     this.spit.clear();
     this.iceMonster.reset(this.seed);
@@ -520,7 +521,7 @@ export class Game {
     this.landscapeReached = Math.max(this.landscapeReached, Math.floor(p / LANDSCAPE_LENGTH));
     this.iceMonster.dismiss();
     this.storm.reset();
-    this.storm.placeBehind(p);
+    this.storm.placeBehind(p - PLAYER_BEHIND);
     // The storm's speed follows the position within the landscape by itself.
     this.elapsed = 0;
     this.quench();
@@ -529,13 +530,13 @@ export class Game {
     this.updateLighting();
   }
 
-  /** Player on the path centre at progress p, the apple just ahead, facing it. */
+  /** Player on the path centre a little behind progress p, the apple just ahead of p, facing it. */
   private placeOnPath(p: number): void {
     const t = this.world.terrain;
     this.world.prewarm(-p);
-    const px = t.pathCenterX(p);
+    const px = t.pathCenterX(p - PLAYER_BEHIND);
     const ax = t.pathCenterX(p + APPLE_AHEAD);
-    this.player.reset(px, -p, Math.atan2(-(ax - px), APPLE_AHEAD));
+    this.player.reset(px, -(p - PLAYER_BEHIND), Math.atan2(-(ax - px), APPLE_AHEAD + PLAYER_BEHIND));
     this.apple.reset(ax, -(p + APPLE_AHEAD));
   }
 
@@ -556,6 +557,12 @@ export class Game {
       const p = base + i * 0.5;
       if (this.respawnClear(p)) return p;
     }
+    // Dense stretches (e.g. Greek obstacles before a gorge): look further back.
+    for (let i = 81; i <= 240; i++) {
+      const p = base - i * 0.5;
+      if (p < 0) break;
+      if (this.respawnClear(p)) return p;
+    }
     return base;
   }
 
@@ -572,8 +579,8 @@ export class Game {
       if (zb.state !== 'down' && Math.abs(-zb.group.position.z - (p + APPLE_AHEAD / 2)) < 12) return false;
     }
     if (this.iceMonster.active && Math.abs(this.iceMonster.progress - (p + APPLE_AHEAD / 2)) < RAGE_HALF_LENGTH + 10) return false;
-    if (Math.abs(t.pathSlope(p)) > 0.08 || Math.abs(t.pathSlope(p + APPLE_AHEAD)) > 0.08) return false;
-    for (let q = p - 1; q <= p + APPLE_AHEAD + 1.5; q += 0.25) {
+    if (Math.abs(t.pathSlope(p - PLAYER_BEHIND)) > 0.08 || Math.abs(t.pathSlope(p + APPLE_AHEAD)) > 0.08) return false;
+    for (let q = p - PLAYER_BEHIND - 1; q <= p + APPLE_AHEAD + 1.5; q += 0.25) {
       const x = t.pathCenterX(q);
       const z = -q;
       if (this.world.rollingResistance(x, z) > t.rollingResistance(x, z)) return false;

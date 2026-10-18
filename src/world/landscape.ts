@@ -1,12 +1,14 @@
 import * as THREE from 'three';
 import { CFG } from '../config';
 import { clamp, smoothstep } from '../utils/math';
+import { mulberry32, subSeed } from '../utils/noise';
 
 /**
  * Landscapes change every LANDSCAPE_LENGTH metres along the path. In the
- * endless mode they loop: after the last one the first one (the autumn forest)
- * comes back. In the story mode every one comes once, then the snowy home
- * stretch with the hut at the end of the path.
+ * story mode every one comes once in the order of LANDSCAPES, then the snowy
+ * home stretch with the hut at the end of the path. The endless mode starts in
+ * the autumn forest and then picks them at random from the world seed, never
+ * the same one twice in a row and never the home stretch.
  */
 export type Landscape = 'forest' | 'greece' | 'desert' | 'antarctic' | 'subway' | 'town' | 'home';
 
@@ -52,9 +54,35 @@ export interface LandscapeMix {
 
 const mod = (a: number, n: number): number => ((a % n) + n) % n;
 
+/** Endless mode: the landscapes drawn so far, by index; extended on demand. */
+const endlessOrder: Landscape[] = [LANDSCAPES[0]];
+let endlessRng = mulberry32(0);
+/** Testing only: the endless mode loops through LANDSCAPES in order, as it used to. */
+let fixedOrder = false;
+
+/** Testing only; takes effect for the next world that is built. */
+export function setFixedLandscapeOrder(on: boolean): void {
+  fixedOrder = on;
+}
+
+/** Seed the random landscape order of the endless mode; called when a terrain is built. */
+export function setLandscapeSeed(seed: number): void {
+  endlessOrder.length = 1;
+  endlessRng = mulberry32(subSeed(seed, 31000));
+}
+
 export function landscapeOfIndex(k: number): Landscape {
-  if (story && k >= LANDSCAPES.length) return 'home';
-  return LANDSCAPES[mod(k, LANDSCAPES.length)];
+  if (story || fixedOrder) {
+    if (story && k >= LANDSCAPES.length) return 'home';
+    return LANDSCAPES[mod(k, LANDSCAPES.length)];
+  }
+  if (k <= 0) return endlessOrder[0];
+  while (endlessOrder.length <= k) {
+    const prev = endlessOrder[endlessOrder.length - 1];
+    const others = LANDSCAPES.filter((l) => l !== prev);
+    endlessOrder.push(others[Math.floor(endlessRng() * others.length)]);
+  }
+  return endlessOrder[k];
 }
 
 /** Landscape at progress p (hard border, used for everything that is placed discretely). */

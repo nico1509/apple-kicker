@@ -180,7 +180,9 @@ try {
   check(s0.mode === 'story' && !s0.endlessUnlocked, `story mode is the default, endless locked (${s0.mode}, ${s0.endlessUnlocked})`);
   await clickEl('[data-mode="endless"]');
   check((await state()).mode === 'story', 'the locked endless mode cannot be chosen');
-  // The checks below run in the endless mode (the landscapes loop, as before).
+  // The checks below run in the endless mode, with the landscapes looping in
+  // their fixed order as they used to (normally the order is random).
+  await page.evaluate(() => window.__appleKicker.fixedLandscapes(true));
   await page.evaluate(() => window.__appleKicker.unlockEndless());
   await clickEl('[data-mode="endless"]');
   const sm = await state();
@@ -200,9 +202,9 @@ try {
   await simulate(0.3);
   await shot('02-start-legs.png');
 
-  await simulate(0.6, ['KeyW']);
+  await simulate(0.9, ['KeyW']);
   const s2 = await state();
-  // The apple sits 1.2 m ahead: the body bumps it and is held back a little.
+  // The apple sits 2.5 m ahead: the body bumps it and is held back a little.
   check(s2.playerZ < s1.playerZ - 0.8, `player walks forward (${s2.playerZ.toFixed(2)} m)`);
   check(s2.appleProgress > 1.3 || !s2.appleResting, `walking into the apple nudges it (${s2.appleProgress.toFixed(2)} m)`);
 
@@ -849,7 +851,8 @@ try {
   await look(e2.playerYaw, -0.3);
   await simulate(0.05);
   await shot('09-continue.png');
-  const clear = await page.evaluate(() => window.__appleKicker.game.respawnClear(window.__appleKicker.game.player.progress));
+  // The player stands 1.3 m behind the spot that was checked.
+  const clear = await page.evaluate(() => window.__appleKicker.game.respawnClear(window.__appleKicker.game.player.progress + 1.3));
   check(e2.state === 'playing' && e2.lives === 2, `"Weitermachen" continues the run (${e2.state})`);
   check(e2.appleMax === e1.appleMax, `distance reached is kept (${e2.appleMax.toFixed(1)} m)`);
   const pp = -e2.playerZ;
@@ -1161,6 +1164,21 @@ try {
     const r4 = await walkAndKick('right', 300, 0);
     check(r4.after.appleProgress > gn3.appleProgress + 4, `the freed apple can be kicked on (${r4.after.appleProgress.toFixed(1)} m)`);
   }
+
+  // Endless mode: the landscapes come in a random order per world, starting
+  // in the forest, never the same one twice in a row, never the home stretch.
+  const orders = await page.evaluate(() => {
+    const k = window.__appleKicker;
+    k.fixedLandscapes(false);
+    const a = k.landscapes(60);
+    k.game.rebuildWorld();
+    return [a, k.landscapes(60)];
+  });
+  for (const o of orders) {
+    const repeats = o.filter((l, i) => i > 0 && l === o[i - 1]).length;
+    check(o[0] === 'forest' && repeats === 0 && !o.includes('home') && new Set(o).size === 6, `endless: random landscape order without repeats (${o.slice(0, 10).join(', ')} …)`);
+  }
+  check(orders[0].join() !== orders[1].join(), 'endless: a new world has a different landscape order');
 
   // Story mode: every landscape once, then the snowy home stretch where the
   // path ends at a cabin. Apple and player inside = won, endless unlocked.
