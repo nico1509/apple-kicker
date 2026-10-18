@@ -557,6 +557,12 @@ export class Game {
       const p = base + i * 0.5;
       if (this.respawnClear(p)) return p;
     }
+    // Dense stretches (e.g. Greek obstacles before a gorge): look further back.
+    for (let i = 81; i <= 240; i++) {
+      const p = base - i * 0.5;
+      if (p < 0) break;
+      if (this.respawnClear(p)) return p;
+    }
     return base;
   }
 
