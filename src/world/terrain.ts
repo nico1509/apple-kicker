@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { CFG } from '../config';
 import { clamp, lerp, smoothstep } from '../utils/math';
 import { fbm1, fbm2, hash3, mulberry32, noise1, subSeed, valueNoise2 } from '../utils/noise';
-import { endlessHardening, HUT_PROGRESS, LANDSCAPE_LENGTH, landscapeOfIndex, landscapeWeight, rampProgress, storyMode, type Landscape } from './landscape';
+import { endlessHardening, HUT_PROGRESS, LANDSCAPE_LENGTH, landscapeOfIndex, landscapeWeight, rampProgress, setLandscapeSeed, storyMode, type Landscape } from './landscape';
 import { buildSubwaySection, SUBWAY, subwayCut, subwayStart, subwayStraight, subwayWallHalf, trainDeck, type SubwaySection } from './subway';
 
 /**
@@ -190,6 +190,7 @@ export class Terrain {
 
   constructor(seed: number) {
     this.seed = seed >>> 0;
+    setLandscapeSeed(this.seed);
     const rng = mulberry32(subSeed(this.seed, 1));
     this.phase = [rng() * 6.28, rng() * 6.28, rng() * 6.28];
   }

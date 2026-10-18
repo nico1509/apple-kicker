@@ -1,5 +1,6 @@
 import './style.css';
 import { Game } from './game';
+import { landscapeOfIndex, setFixedLandscapeOrder } from './world/landscape';
 
 declare global {
   interface Window {
@@ -11,6 +12,8 @@ declare global {
       setDifficulty: (d: 'easy' | 'hard') => void;
       setMode: (m: 'story' | 'endless') => void;
       unlockEndless: (on?: boolean) => void;
+      fixedLandscapes: (on?: boolean) => void;
+      landscapes: (count: number) => string[];
       kick: (dx: number, dy: number, foot: 'left' | 'right', chip?: boolean) => void;
       simulate: (seconds: number, keys?: string[]) => void;
       look: (yaw: number, pitch: number) => void;
@@ -40,6 +43,8 @@ function boot(): void {
       setDifficulty: (d) => game.setDifficulty(d),
       setMode: (m) => game.setMode(m),
       unlockEndless: (on = true) => game.debugUnlock(on),
+      fixedLandscapes: (on = true) => setFixedLandscapeOrder(on),
+      landscapes: (count) => Array.from({ length: count }, (_, k) => landscapeOfIndex(k)),
       kick: (dx, dy, foot, chip = false) => game.debugKick(dx, dy, foot, chip),
       simulate: (seconds, keys = []) => game.simulate(seconds, keys),
       look: (yaw, pitch) => game.debugLook(yaw, pitch),
