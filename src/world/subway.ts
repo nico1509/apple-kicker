@@ -115,10 +115,13 @@ export function subwayCut(p: number): number {
   return SUBWAY.cut * smoothstep(s + WALL_START, s + WALL_START + FUNNEL, p) * (1 - smoothstep(end - FUNNEL, end, p));
 }
 
+/** Into the section, the regular bottles give way to the rows of the subway between these. */
+export const SUBWAY_CORE = { from: WALL_START + FUNNEL / 2, to: LANDSCAPE_LENGTH - WALL_START - FUNNEL / 2 } as const;
+
 /** True where the regular path things (bottles, obstacles) give way to the subway. */
 export function inSubwayCore(p: number): boolean {
   const s = subwayStart(p);
-  return s !== null && p > s + WALL_START + FUNNEL / 2 && p < s + LANDSCAPE_LENGTH - WALL_START - FUNNEL / 2;
+  return s !== null && p > s + SUBWAY_CORE.from && p < s + SUBWAY_CORE.to;
 }
 
 /** Lays out the trains of the subway section starting at s. */

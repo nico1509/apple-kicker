@@ -555,6 +555,20 @@ try {
   });
   check(rows.n >= 20 && rows.onLane === rows.n, `bottles stand in rows on the tracks (${rows.onLane}/${rows.n})`);
   check(rows.high > 0, `some bottles lead over the roofs (${rows.high})`);
+  // No long dry stretch anywhere in the subway, also not after the last train.
+  const dry = await page.evaluate(() => {
+    const k = window.__appleKicker;
+    const all = [];
+    for (let p = 3950; p <= 5050; p += 100) {
+      k.teleport(p);
+      all.push(...k.game.debugBottles().map((b) => -b.z));
+    }
+    const ps = [...new Set(all)].filter((p) => p > 3980 && p < 5020).sort((a, b) => a - b);
+    let gap = 0;
+    for (let i = 1; i < ps.length; i++) gap = Math.max(gap, ps[i] - ps[i - 1]);
+    return gap;
+  });
+  check(dry <= 28, `bottles all the way through the subway (longest gap ${dry.toFixed(1)} m)`);
   const respawnOnTrain = await page.evaluate((t) => window.__appleKicker.game.respawnClear(t.front + 2), sub.trains.find((t) => t.x === 0));
   check(!respawnOnTrain, 'nobody respawns on a train');
 

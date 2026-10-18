@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { CFG } from '../config';
 import { mulberry32, rand, subSeed, type Rng } from '../utils/noise';
 import { sphereContact, type ColliderStore, type Contact } from './colliders';
-import { inSubwayCore, SUBWAY, type SubwaySection } from './subway';
+import { inSubwayCore, SUBWAY, SUBWAY_CORE, type SubwaySection } from './subway';
 import { Terrain } from './terrain';
 
 interface Bottle {
@@ -11,6 +11,9 @@ interface Bottle {
   baseY: number;
   phase: number;
 }
+
+/** In the subway no two rows of bottles along a way are further apart than this. */
+const FILL_GAP = 18;
 
 /** Metres a bottle may be moved along the path to keep clear of an obstacle. */
 const NUDGE = 1.5;
@@ -182,16 +185,36 @@ export class Bottles {
       b.lanes.forEach((l, lane) => {
         const x = SUBWAY.lanes[lane];
         if (l === 'free') {
-          for (let j = 0; j < 6; j++) rows!.push({ key: `w${sec.s}-${bi}-${lane}-${j}`, x, p: b.p0 + 2 + j * 2.5 });
+          // Groups of four all along the free track.
+          for (let j = 0, p = b.p0 + 2; p < b.p1; j++, p += j % 4 ? 2.5 : 7.5) rows!.push({ key: `w${sec.s}-${bi}-${lane}-${j}`, x, p });
         } else if (l === 'ramp') {
+          // Up the ramp, then on along the roof.
           const t = sec.trains.find((t) => t.lane === lane && t.p0 >= b.p0 && t.p0 < b.p1);
           if (!t) return;
-          for (let j = 0; j < 10 && t.p0 + 1.5 + j * 2.5 < t.p1 - 1; j++) rows!.push({ key: `w${sec.s}-${bi}-${lane}-${j}`, x, p: t.p0 + 1.5 + j * 2.5 });
+          let j = 0;
+          for (let p = t.p0 + 1.5; p < t.p1 - 1; j++, p += j < 8 ? 2.5 : 10) rows!.push({ key: `w${sec.s}-${bi}-${lane}-${j}`, x, p });
+          // A short train ends before the others: on along the track behind it.
+          for (let p = t.p1 + 4; p < b.p1; j++, p += 10) rows!.push({ key: `w${sec.s}-${bi}-${lane}-${j}`, x, p });
         }
       });
       const x = SUBWAY.lanes[Math.floor(rng() * 3)];
       for (let j = 0; j < 3; j++) rows!.push({ key: `w${sec.s}-${bi}-g-${j}`, x, p: b.p1 + 2.5 + j * 2.5 });
     });
+    // No long dry stretch: fill gaps on the middle track (before the first and
+    // after the last block of trains), overlapping a little with the usual
+    // bottles before and after the subway.
+    const ps = rows.map((r) => r.p).sort((a, b) => a - b);
+    const free = (p: number): boolean => sec.blocks.every((b) => p < b.p0 - 1 || p > b.p1 + 1 || b.lanes[1] === 'free');
+    let prev = sec.s + SUBWAY_CORE.from - FILL_GAP;
+    let n = 0;
+    for (const next of [...ps, sec.s + SUBWAY_CORE.to + FILL_GAP]) {
+      for (let p = prev + FILL_GAP; p < next - FILL_GAP / 2; p += FILL_GAP) {
+        if (!free(p)) continue;
+        for (let j = 0; j < 3; j++) rows.push({ key: `w${sec.s}-f${n}-${j}`, x: 0, p: p + j * 2.5 });
+        n++;
+      }
+      prev = Math.max(prev, next);
+    }
     this.rows.set(sec.s, rows);
     return rows;
   }
