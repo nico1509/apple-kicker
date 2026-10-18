@@ -845,13 +845,17 @@ export class Game {
   /** The thirst bar drains fast; a bottle on the path fills it (and the stamina) up again. Empty costs a life. */
   private updateThirst(dt: number): void {
     if (this.state !== 'playing') return;
-    const got = this.world.bottles.collect(this.player.pos);
+    const { got, cans } = this.world.bottles.collect(this.player.pos);
     if (got > 0) {
       this.bottles += got;
       this.thirst = Math.min(1, this.thirst + got * CFG.thirst.refill);
       this.player.refillStamina();
       this.audio.drink();
-      this.hint('Apfelschorle! Ahh …', 1100, 'good');
+      if (cans > 0) {
+        // The energy drinks of the subway: twice as fast sprinting for a while (restarts, never adds up).
+        this.player.boost(CFG.energy.seconds);
+        this.hint('Energydrink! Doppelt so schnell sprinten!', 1400, 'good');
+      } else this.hint('Apfelschorle! Ahh …', 1100, 'good');
     }
     this.thirst = Math.max(0, this.thirst - dt / CFG.thirst.drainSeconds);
     if (this.thirst < CFG.thirst.warnBelow && this.thirst > 0) {
@@ -959,7 +963,7 @@ export class Game {
     hud.setDistance(this.apple.maxProgress, Math.max(this.best, this.apple.maxProgress));
     const dist = this.storm.distanceTo(this.chasedProgress());
     hud.setStorm(dist, clamp(1 - dist / 110, 0, 1), this.appleTrails());
-    hud.setStamina(this.player.stamina, this.player.exhausted > 0);
+    hud.setStamina(this.player.stamina, this.player.exhausted > 0, this.player.boosted > 0);
     hud.setVignette(this.storm.intensity * 0.8);
     const drag = this.input.drag;
     if (drag && this.state === 'playing') {
@@ -1114,7 +1118,7 @@ export class Game {
   }
 
   /** Bottles still floating in the generated chunks (testing only). */
-  debugBottles(): Array<{ x: number; y: number; z: number }> {
+  debugBottles(): Array<{ x: number; y: number; z: number; kind: 'bottle' | 'can' }> {
     return this.world.bottles.positions();
   }
 
@@ -1152,6 +1156,7 @@ export class Game {
       lives: this.lives,
       landscapeReached: this.landscapeReached,
       stamina: this.player.stamina,
+      boosted: this.player.boosted,
       exhausted: this.player.exhausted,
       thirst: this.thirst,
       bottles: this.bottles,

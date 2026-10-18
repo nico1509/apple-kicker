@@ -591,6 +591,46 @@ try {
     return gap;
   });
   check(dry <= 28, `bottles all the way through the subway (longest gap ${dry.toFixed(1)} m)`);
+  // In the subway they are energy drink cans: twice the sprint speed for 4 s, a second can restarts the time.
+  const energy = await page.evaluate(() => {
+    const k = window.__appleKicker;
+    const g = k.game;
+    k.teleport(4300);
+    g.debugThirst(1);
+    const list = g.debugBottles().filter((b) => -b.z > 4100 && -b.z < 4500);
+    // Only cans ahead, the storm is close behind.
+    const cans = list.filter((b) => b.kind === 'can' && -b.z > 4300);
+    const all = list.filter((b) => b.kind === 'can').length;
+    const grab = (c) => {
+      g.player.pos.set(c.x, c.y - 0.8, c.z);
+      k.simulate(1 / 60);
+    };
+    grab(cans[0]);
+    const first = k.state().boosted;
+    k.simulate(2);
+    const later = k.state().boosted;
+    grab(cans.find((b) => Math.hypot(b.x - g.player.pos.x, b.z - g.player.pos.z) > 3));
+    const again = k.state().boosted;
+    const speed = () => {
+      k.look(0, 0);
+      k.simulate(1, ['KeyW', 'ShiftLeft']);
+      const p0 = g.player.pos.clone();
+      k.simulate(1, ['KeyW', 'ShiftLeft']);
+      return Math.hypot(g.player.pos.x - p0.x, g.player.pos.z - p0.z);
+    };
+    k.teleport(300);
+    g.debugThirst(1);
+    const normal = speed();
+    k.teleport(400);
+    g.debugThirst(1);
+    g.player.boost(4);
+    const boosted = speed();
+    k.simulate(3);
+    return { n: list.length, cans: all, first, later, again, normal, boosted, end: k.state().boosted };
+  });
+  check(energy.cans === energy.n, `the subway has energy drink cans instead of bottles (${energy.cans}/${energy.n})`);
+  check(Math.abs(energy.first - 4) < 0.05 && Math.abs(energy.later - 2) < 0.1 && Math.abs(energy.again - 4) < 0.05, `a can boosts for 4 s and another one restarts it (${energy.first.toFixed(2)}, ${energy.later.toFixed(2)}, ${energy.again.toFixed(2)})`);
+  check(energy.boosted > energy.normal * 1.8 && energy.end === 0, `the boost doubles the sprint speed (${energy.normal.toFixed(1)} → ${energy.boosted.toFixed(1)} m/s)`);
   const respawnOnTrain = await page.evaluate((t) => window.__appleKicker.game.respawnClear(t.front + 2), sub.trains.find((t) => t.x === 0));
   check(!respawnOnTrain, 'nobody respawns on a train');
 

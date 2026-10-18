@@ -233,10 +233,11 @@ export class Hud {
     this.stormWrap.classList.toggle('critical', danger > 0.85);
   }
 
-  setStamina(v: number, exhausted = false): void {
+  setStamina(v: number, exhausted = false, boosted = false): void {
     this.staminaBar.style.width = `${Math.round(v * 100)}%`;
     this.staminaWrap.classList.toggle('low', v < 0.25);
     this.staminaWrap.classList.toggle('exhausted', exhausted);
+    this.staminaWrap.classList.toggle('boosted', boosted);
   }
 
   /** Thirst bar: 1 = quenched, 0 = parched (that costs a life). */

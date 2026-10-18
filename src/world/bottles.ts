@@ -7,6 +7,8 @@ import { Terrain } from './terrain';
 
 interface Bottle {
   key: string;
+  /** A bottle of apple spritzer, or an energy drink can in the subway. */
+  kind: 'bottle' | 'can';
   pivot: THREE.Group;
   baseY: number;
   phase: number;
@@ -25,6 +27,16 @@ const HEIGHT = 0.5;
 const PROFILE: Array<[number, number]> = [
   [0, 0], [0.052, 0], [0.058, 0.01], [0.06, 0.03], [0.06, 0.2], [0.058, 0.235],
   [0.045, 0.27], [0.028, 0.305], [0.021, 0.33], [0.02, 0.385], [0.023, 0.39], [0.023, 0.398], [0, 0.398],
+];
+
+/** Radius of the slim energy drink can and the height of its painted wall. */
+const CAN_R = 0.082;
+const CAN_WALL: [number, number] = [0.025, 0.43];
+
+/** Profile of the metal of the can (radius, height): bottom, wall (under the paint), neck and lid. */
+const CAN_PROFILE: Array<[number, number]> = [
+  [0, 0.012], [CAN_R * 0.8, 0], [CAN_R, 0.02], [CAN_R * 0.99, 0.03], [CAN_R * 0.99, 0.42], [CAN_R, 0.435],
+  [CAN_R * 0.86, 0.47], [CAN_R * 0.86, 0.48], [CAN_R * 0.8, 0.48], [CAN_R * 0.78, 0.472], [0, 0.472],
 ];
 
 /**
@@ -49,6 +61,11 @@ export class Bottles {
   private readonly labelGeo: THREE.CylinderGeometry;
   private readonly neckGeo: THREE.CylinderGeometry;
   private readonly capGeo: THREE.CylinderGeometry;
+  private readonly canTex: THREE.CanvasTexture;
+  private readonly canMat: THREE.MeshStandardMaterial;
+  private readonly metalMat = new THREE.MeshStandardMaterial({ color: 0xc9ced6, emissive: 0x30343a, roughness: 0.3, metalness: 0.35 });
+  private readonly canGeo: THREE.CylinderGeometry;
+  private readonly metalGeo: THREE.LatheGeometry;
   private readonly chunks = new Map<number, Bottle[]>();
   /** Bottles already drunk in this world (they stay gone when a chunk is rebuilt). */
   private readonly taken = new Set<string>();
@@ -70,6 +87,17 @@ export class Bottles {
     this.capGeo = new THREE.CylinderGeometry(0.0245 * s, 0.0245 * s, 0.016 * s, 12).translate(0, 0.395 * s, 0);
     this.spotRng = mulberry32(subSeed(terrain.seed, 1699));
     this.labelTex = Bottles.makeLabelTexture();
+    this.canGeo = new THREE.CylinderGeometry(CAN_R, CAN_R, CAN_WALL[1] - CAN_WALL[0], 16, 1, true).translate(0, (CAN_WALL[0] + CAN_WALL[1]) / 2, 0);
+    this.metalGeo = new THREE.LatheGeometry(CAN_PROFILE.map(([r, y]) => new THREE.Vector2(r, y)), 16);
+    this.canTex = Bottles.makeCanTexture();
+    this.canMat = new THREE.MeshStandardMaterial({
+      map: this.canTex,
+      emissive: 0xffffff,
+      emissiveMap: this.canTex,
+      emissiveIntensity: 0.3,
+      roughness: 0.35,
+      metalness: 0.2,
+    });
     this.labelMat = new THREE.MeshStandardMaterial({
       map: this.labelTex,
       emissive: 0xffffff,
@@ -109,6 +137,55 @@ export class Bottles {
       g.font = 'bold 15px sans-serif';
       g.fillText('SCHORLE', 64, 86);
       g.fillText('SCHORLE', 192, 86);
+    }
+    const tex = new THREE.CanvasTexture(c);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    return tex;
+  }
+
+  /**
+   * Energy drink can: blue and silver in diagonal quarters, a yellow sun and
+   * red lettering, twice round the can (a made-up brand).
+   */
+  private static makeCanTexture(): THREE.CanvasTexture {
+    const c = document.createElement('canvas');
+    c.width = 256;
+    c.height = 192;
+    const g = c.getContext('2d');
+    if (g) {
+      g.fillStyle = '#c9ced6';
+      g.fillRect(0, 0, 256, 192);
+      // Blue diagonal quarters.
+      g.fillStyle = '#1d3f92';
+      for (const x0 of [0, 128]) {
+        g.beginPath();
+        g.moveTo(x0, 0);
+        g.lineTo(x0 + 64, 0);
+        g.lineTo(x0 + 128, 96);
+        g.lineTo(x0 + 64, 192);
+        g.lineTo(x0, 192);
+        g.lineTo(x0 + 64, 96);
+        g.closePath();
+        g.fill();
+      }
+      g.textAlign = 'center';
+      g.textBaseline = 'middle';
+      for (const cx of [64, 192]) {
+        g.fillStyle = '#f2c21b';
+        g.beginPath();
+        g.arc(cx, 72, 26, 0, Math.PI * 2);
+        g.fill();
+        g.fillStyle = '#d4202c';
+        g.strokeStyle = '#ffffff';
+        g.lineWidth = 4;
+        g.font = 'bold 40px sans-serif';
+        g.strokeText('KICK', cx, 112);
+        g.fillText('KICK', cx, 112);
+        g.font = 'bold 14px sans-serif';
+        g.lineWidth = 3;
+        g.strokeText('ENERGY DRINK', cx, 140);
+        g.fillText('ENERGY DRINK', cx, 140);
+      }
     }
     const tex = new THREE.CanvasTexture(c);
     tex.colorSpace = THREE.SRGBColorSpace;
@@ -158,14 +235,15 @@ export class Bottles {
         if (this.clear(x, gy, z)) break;
       }
       // If every spot is blocked the bottle still floats there: the gap matters more.
-      this.addBottle(group, list, key, x, gy, z, rng);
+      this.addBottle(group, list, key, 'bottle', x, gy, z, rng);
     }
     const sec = this.terrain.subwayAt(p0) ?? this.terrain.subwayAt(p1);
     if (sec) {
       for (const r of this.subwayRows(sec)) {
         if (r.p < p0 || r.p >= p1 || this.taken.has(r.key)) continue;
         const gy = Math.max(this.terrain.groundHeight(r.x, -r.p), this.terrain.deckHeight(r.x, -r.p));
-        this.addBottle(group, list, r.key, r.x, gy, -r.p, rng);
+        // In the subway they are energy drink cans.
+        this.addBottle(group, list, r.key, 'can', r.x, gy, -r.p, rng);
       }
     }
     return group;
@@ -219,24 +297,29 @@ export class Bottles {
     return rows;
   }
 
-  private addBottle(group: THREE.Group, list: Bottle[], key: string, x: number, gy: number, z: number, rng: Rng): void {
+  private addBottle(group: THREE.Group, list: Bottle[], key: string, kind: Bottle['kind'], x: number, gy: number, z: number, rng: Rng): void {
     const pivot = new THREE.Group();
     // The bottle is centred on the tilt group, which leans it; the pivot spins it.
     const tilt = new THREE.Group();
     tilt.rotation.z = CFG.thirst.tilt;
-    const body = new THREE.Mesh(this.bodyGeo, this.glassMat);
-    body.castShadow = true;
-    const label = new THREE.Mesh(this.labelGeo, this.labelMat);
-    const neck = new THREE.Mesh(this.neckGeo, this.neckMat);
-    const cap = new THREE.Mesh(this.capGeo, this.capMat);
-    for (const m of [body, label, neck, cap]) m.position.y = -HEIGHT / 2;
-    tilt.add(body, label, neck, cap);
+    const parts =
+      kind === 'can'
+        ? [new THREE.Mesh(this.metalGeo, this.metalMat), new THREE.Mesh(this.canGeo, this.canMat)]
+        : [
+            new THREE.Mesh(this.bodyGeo, this.glassMat),
+            new THREE.Mesh(this.labelGeo, this.labelMat),
+            new THREE.Mesh(this.neckGeo, this.neckMat),
+            new THREE.Mesh(this.capGeo, this.capMat),
+          ];
+    parts[0].castShadow = true;
+    for (const m of parts) m.position.y = -HEIGHT / 2;
+    tilt.add(...parts);
     pivot.add(tilt);
     const baseY = gy + CFG.thirst.hoverHeight;
     pivot.position.set(x, baseY, z);
     pivot.name = 'bottle';
     group.add(pivot);
-    list.push({ key, pivot, baseY, phase: rng() * Math.PI * 2 });
+    list.push({ key, kind, pivot, baseY, phase: rng() * Math.PI * 2 });
   }
 
   private clear(x: number, gy: number, z: number): boolean {
@@ -267,9 +350,10 @@ export class Bottles {
     }
   }
 
-  /** Collects every bottle within reach of a player standing at `pos` (feet); returns how many. */
-  collect(pos: THREE.Vector3): number {
+  /** Collects every bottle within reach of a player standing at `pos` (feet); returns how many, and how many of them are cans. */
+  collect(pos: THREE.Vector3): { got: number; cans: number } {
     let n = 0;
+    let cans = 0;
     const reach = CFG.thirst.pickupRadius;
     for (const list of this.chunks.values()) {
       for (let k = list.length - 1; k >= 0; k--) {
@@ -281,22 +365,24 @@ export class Bottles {
         list.splice(k, 1);
         this.taken.add(b.key);
         n++;
+        if (b.kind === 'can') cans++;
       }
     }
-    return n;
+    return { got: n, cans };
   }
 
   /** Positions of the bottles still lying around (testing only). */
-  positions(): Array<{ x: number; y: number; z: number }> {
-    const out: Array<{ x: number; y: number; z: number }> = [];
-    for (const list of this.chunks.values()) for (const b of list) out.push({ x: b.pivot.position.x, y: b.pivot.position.y, z: b.pivot.position.z });
+  positions(): Array<{ x: number; y: number; z: number; kind: Bottle['kind'] }> {
+    const out: Array<{ x: number; y: number; z: number; kind: Bottle['kind'] }> = [];
+    for (const list of this.chunks.values()) for (const b of list) out.push({ x: b.pivot.position.x, y: b.pivot.position.y, z: b.pivot.position.z, kind: b.kind });
     return out;
   }
 
   dispose(): void {
     this.chunks.clear();
-    for (const m of [this.glassMat, this.capMat, this.labelMat, this.neckMat]) m.dispose();
+    for (const m of [this.glassMat, this.capMat, this.labelMat, this.neckMat, this.canMat, this.metalMat]) m.dispose();
     this.labelTex.dispose();
-    for (const g of [this.bodyGeo, this.labelGeo, this.neckGeo, this.capGeo]) g.dispose();
+    this.canTex.dispose();
+    for (const g of [this.bodyGeo, this.labelGeo, this.neckGeo, this.capGeo, this.canGeo, this.metalGeo]) g.dispose();
   }
 }

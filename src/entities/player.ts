@@ -65,6 +65,8 @@ export class Player {
   private inBush = 0;
   /** Displacement still to be applied from a shove (e.g. camel spit), in metres. */
   private shoveX = 0;
+  /** Seconds left of the energy drink's faster sprint. */
+  boosted = 0;
   /** Downward speed while dropping off a train roof. */
   private fallSpeed = 0;
   /**
@@ -106,6 +108,11 @@ export class Player {
     this.exhausted = 0;
   }
 
+  /** An energy drink: sprinting is faster for `seconds` (another one restarts the time). */
+  boost(seconds: number): void {
+    this.boosted = seconds;
+  }
+
   /** Push the player by (dx, dz) metres; applied smoothly over a few frames. */
   shove(dx: number, dz: number): void {
     this.shoveX += dx;
@@ -129,6 +136,7 @@ export class Player {
     this.vel.set(0, 0, 0);
     this.shoveX = this.shoveZ = 0;
     this.fallSpeed = 0;
+    this.boosted = 0;
     this.yaw = yaw;
     this.pitch = -0.25;
     this.stamina = 1;
@@ -201,6 +209,7 @@ export class Player {
       this.intentX = 0;
       this.intentZ = 0;
     } else {
+      this.boosted = Math.max(0, this.boosted - dt);
       if (this.exhausted > 0) {
         // Catching the breath fills the stamina bar completely within that second.
         this.exhausted = Math.max(0, this.exhausted - dt);
@@ -217,7 +226,8 @@ export class Player {
       const slopeFactor = clamp(1 - Math.max(0, slope) * 1.2, 0.55, 1);
       const bushFactor = lerp(1, 0.4, this.inBush);
       const kickFactor = this.kick ? 0.35 : 1;
-      const targetSpeed = (wantSprint ? CFG.player.sprintSpeed : CFG.player.walkSpeed * throttle) * slopeFactor * bushFactor * kickFactor;
+      const sprintSpeed = CFG.player.sprintSpeed * (this.boosted > 0 ? CFG.energy.sprintFactor : 1);
+      const targetSpeed = (wantSprint ? sprintSpeed : CFG.player.walkSpeed * throttle) * slopeFactor * bushFactor * kickFactor;
       const tx = fwd.x * mz + rgt.x * mx;
       const tz = fwd.z * mz + rgt.z * mx;
       const tl = Math.hypot(tx, tz) || 1;

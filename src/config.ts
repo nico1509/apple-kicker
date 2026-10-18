@@ -61,6 +61,10 @@ export const CFG = {
     tilt: 0.35, // radians the floating bottle leans
     pickupRadius: 1.0,
   },
+  energy: {
+    seconds: 4, // an energy drink can in the subway doubles the sprint speed this long ...
+    sprintFactor: 2, // ... by this factor; another can restarts the time, it does not add up
+  },
   storm: {
     startBehind: 58, // metres behind the start line
     baseSpeed: 2.2, // at the start of every landscape ...
