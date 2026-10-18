@@ -702,7 +702,7 @@ button.choice.selected {
   display: none;
 }
 
-/* On-screen controls: half-transparent sticks, the chip button and a pause button. */
+/* On-screen controls: a half-transparent stick, the chip button and a pause button. */
 .touch-layer {
   position: absolute;
   inset: 0;
@@ -724,10 +724,6 @@ button.choice.selected {
 
 .touch-stick.move {
   left: calc(28px + env(safe-area-inset-left));
-}
-
-.touch-stick.look {
-  right: calc(28px + env(safe-area-inset-right));
 }
 
 .touch-stick.held {

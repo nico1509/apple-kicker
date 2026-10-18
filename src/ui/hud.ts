@@ -366,7 +366,7 @@ export class Hud {
         ${Hud.kickstartHtml(bests.easy)}
       </div>
       <div class="hint only-touch">
-        <span><b>Linker Stick</b> laufen, über den Rand = sprinten</span><span><b>Rechter Stick</b> umsehen</span>
+        <span><b>Stick</b> hoch/runter = laufen, links/rechts = drehen, über den Rand = sprinten</span>
         <span><b>Wischen</b> = Kick</span><span><b>Roter Knopf</b> halten = Lupfer</span>
       </div>
       <div class="hint only-mouse">

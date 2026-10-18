@@ -2,8 +2,10 @@ import type { Input } from '../entities/input';
 
 /** Swipe pixels count this much more than mouse pixels: a phone screen is small. */
 const SWIPE_SCALE = 1.7;
-/** The finger this far past the movement stick's rim means sprint. */
+/** The finger this far past the stick's rim means sprint. */
 const SPRINT_BEYOND = 1.2;
+/** Sideways deflection below this does not turn, so walking straight stays straight. */
+const TURN_DEAD_ZONE = 0.15;
 
 interface Stick {
   base: HTMLElement;
@@ -15,8 +17,8 @@ interface Stick {
 }
 
 /**
- * On-screen controls for touch devices: a movement stick on the left with the
- * chip button next to it, a look stick on the right and a pause button.
+ * On-screen controls for touch devices: a stick on the left (up/down walks,
+ * left/right turns) with the chip button next to it, and a pause button.
  * A swipe anywhere else is a kick, like dragging with the left mouse button.
  */
 export class TouchControls {
@@ -24,7 +26,6 @@ export class TouchControls {
   enabled: boolean;
   private readonly layer: HTMLElement;
   private readonly move: Stick;
-  private readonly look: Stick;
   private readonly chip: HTMLElement;
   private chipTouch: number | null = null;
   private kickTouch: number | null = null;
@@ -44,14 +45,12 @@ export class TouchControls {
     this.layer.innerHTML = `
       <div class="touch-stick move"><div class="touch-knob"></div></div>
       <div class="touch-chip" aria-label="Lupfer"></div>
-      <div class="touch-stick look"><div class="touch-knob"></div></div>
       <button class="touch-pause" aria-label="Pause"></button>
     `;
     // Below the menu overlay, so menus stay tappable.
     root.insertBefore(this.layer, root.querySelector('.overlay'));
     const q = (sel: string): HTMLElement => this.layer.querySelector<HTMLElement>(sel)!;
     this.move = { base: q('.touch-stick.move'), knob: q('.touch-stick.move .touch-knob'), touchId: null, cx: 0, cy: 0, radius: 1 };
-    this.look = { base: q('.touch-stick.look'), knob: q('.touch-stick.look .touch-knob'), touchId: null, cx: 0, cy: 0, radius: 1 };
     this.chip = q('.touch-chip');
     q('.touch-pause').addEventListener('touchstart', (e) => {
       e.preventDefault();
@@ -100,7 +99,6 @@ export class TouchControls {
 
   private releaseAll(): void {
     this.endStick(this.move);
-    this.endStick(this.look);
     this.chipTouch = null;
     this.chip.classList.remove('pressed');
     if (this.kickTouch !== null) this.input.cancelDrag();
@@ -124,8 +122,6 @@ export class TouchControls {
         this.chip.classList.add('pressed');
       } else if (this.move.touchId === null && TouchControls.inside(this.move.base, x, y, 24)) {
         this.beginStick(this.move, t);
-      } else if (this.look.touchId === null && TouchControls.inside(this.look.base, x, y, 24)) {
-        this.beginStick(this.look, t);
       } else if (this.kickTouch === null && this.input.startDrag()) {
         this.kickTouch = t.identifier;
         this.kickX = x;
@@ -138,7 +134,6 @@ export class TouchControls {
     e.preventDefault();
     for (const t of Array.from(e.changedTouches)) {
       if (t.identifier === this.move.touchId) this.moveStick(this.move, t);
-      else if (t.identifier === this.look.touchId) this.moveStick(this.look, t);
       else if (t.identifier === this.kickTouch) {
         this.input.dragBy((t.clientX - this.kickX) * SWIPE_SCALE, (t.clientY - this.kickY) * SWIPE_SCALE);
         this.kickX = t.clientX;
@@ -151,7 +146,6 @@ export class TouchControls {
     e.preventDefault();
     for (const t of Array.from(e.changedTouches)) {
       if (t.identifier === this.move.touchId) this.endStick(this.move);
-      else if (t.identifier === this.look.touchId) this.endStick(this.look);
       else if (t.identifier === this.chipTouch) {
         this.chipTouch = null;
         this.input.chipButton = false;
@@ -182,26 +176,20 @@ export class TouchControls {
     const x = (dx * k) / s.radius;
     const y = (dy * k) / s.radius;
     s.knob.style.transform = `translate(${dx * k}px, ${dy * k}px)`;
-    if (s === this.move) {
-      this.input.moveStick.x = x;
-      this.input.moveStick.y = y;
-      this.input.sprintStick = d > s.radius * SPRINT_BEYOND;
-      s.base.classList.toggle('sprint', this.input.sprintStick);
-    } else {
-      this.input.lookStick.x = x;
-      this.input.lookStick.y = y;
-    }
+    // Up/down walks, left/right turns.
+    this.input.moveStick.x = 0;
+    this.input.moveStick.y = y;
+    this.input.turnStick = Math.abs(x) < TURN_DEAD_ZONE ? 0 : (x - Math.sign(x) * TURN_DEAD_ZONE) / (1 - TURN_DEAD_ZONE);
+    this.input.sprintStick = d > s.radius * SPRINT_BEYOND;
+    s.base.classList.toggle('sprint', this.input.sprintStick);
   }
 
   private endStick(s: Stick): void {
     s.touchId = null;
     s.knob.style.transform = '';
     s.base.classList.remove('held', 'sprint');
-    if (s === this.move) {
-      this.input.moveStick.x = this.input.moveStick.y = 0;
-      this.input.sprintStick = false;
-    } else {
-      this.input.lookStick.x = this.input.lookStick.y = 0;
-    }
+    this.input.moveStick.x = this.input.moveStick.y = 0;
+    this.input.turnStick = 0;
+    this.input.sprintStick = false;
   }
 }

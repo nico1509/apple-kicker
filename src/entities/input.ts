@@ -28,12 +28,12 @@ export class Input {
   readonly keys = new Set<string>();
   drag: DragState | null = null;
   readonly kicks: KickRequest[] = [];
-  /** Touch movement stick, -1..1 each (y < 0 = forward). */
+  /** Touch movement, -1..1 each (y < 0 = forward). */
   readonly moveStick = { x: 0, y: 0 };
   /** Movement stick pushed past its rim: sprint. */
   sprintStick = false;
-  /** Touch look stick, -1..1 each: turns the view at a rate while held. */
-  readonly lookStick = { x: 0, y: 0 };
+  /** Touch turning, -1..1 (> 0 = right): turns the view at a rate while held. */
+  turnStick = 0;
   /** Touch chip button held. */
   chipButton = false;
   private lookDX = 0;
@@ -145,7 +145,7 @@ export class Input {
   /** Let go of all touch controls (pause, game over, controls hidden). */
   resetTouch(): void {
     this.moveStick.x = this.moveStick.y = 0;
-    this.lookStick.x = this.lookStick.y = 0;
+    this.turnStick = 0;
     this.sprintStick = false;
     this.chipButton = false;
   }

@@ -48,10 +48,10 @@ Auf Handys und Tablets erscheinen automatisch halbtransparente Bedienelemente:
 
 | Eingabe | Aktion |
 | --- | --- |
-| linker Stick | laufen (bis über den Rand geschoben = sprinten) |
-| rechter Stick | umsehen |
+| Stick hoch / runter | vorwärts / rückwärts laufen (bis über den Rand geschoben = sprinten) |
+| Stick links / rechts | nach links / rechts drehen |
 | wischen (irgendwo sonst auf dem Bildschirm) | Kick, wie mit der Maus: Wischrichtung = Schussrichtung, Wischlänge = Kraft; kurz tippen = Stupser |
-| roter Knopf neben dem linken Stick halten | hoher Lupfer |
+| roter Knopf neben dem Stick halten | hoher Lupfer |
 | Pause-Knopf rechts oben | Pause |
 
 ### Regeln

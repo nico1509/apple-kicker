@@ -25,9 +25,8 @@ interface KickState {
   done: boolean;
 }
 
-/** Touch look stick: turning rates in radians per second at full deflection. */
-const TOUCH_TURN_RATE = 2.6;
-const TOUCH_PITCH_RATE = 1.4;
+/** Touch stick: turning rate in radians per second at full sideways deflection. */
+const TOUCH_TURN_RATE = 2.4;
 /** Touch movement stick: deflection below this is ignored. */
 const TOUCH_DEAD_ZONE = 0.12;
 
@@ -159,11 +158,10 @@ export class Player {
     if (!paused) {
       // ----- look
       const look = input.consumeLook();
-      // The touch look stick turns at a rate; squared for fine aiming near the centre.
-      const sx = input.lookStick.x * Math.abs(input.lookStick.x);
-      const sy = input.lookStick.y * Math.abs(input.lookStick.y);
-      this.yaw -= look.dx * CFG.player.lookSensitivity + sx * TOUCH_TURN_RATE * dt;
-      this.pitch = clamp(this.pitch - look.dy * CFG.player.lookSensitivity - sy * TOUCH_PITCH_RATE * dt, CFG.player.pitchMin, CFG.player.pitchMax);
+      // The touch stick turns at a rate; squared for fine aiming near the centre.
+      const turn = input.turnStick * Math.abs(input.turnStick);
+      this.yaw -= look.dx * CFG.player.lookSensitivity + turn * TOUCH_TURN_RATE * dt;
+      this.pitch = clamp(this.pitch - look.dy * CFG.player.lookSensitivity, CFG.player.pitchMin, CFG.player.pitchMax);
     }
 
     // ----- movement
