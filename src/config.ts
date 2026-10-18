@@ -78,12 +78,12 @@ export const CFG = {
     darkStart: 120, // the storm becomes visible in the sky behind the player below this distance
   },
   endless: {
-    rampLength: 12000, // metres over which the endless mode keeps getting harder, then it stays at its cap
+    rampLength: 6000, // metres over which the endless mode keeps getting harder, then it stays at its cap
     stormBaseExtra: 0.6, // m/s added to the storm's baseSpeed at the cap ...
     stormTopExtra: 0.4, // ... and to its topSpeed
-    densityMax: 1 / 6, // obstacles per metre at the cap (1 / 8.5 before)
-    hillChanceMax: 0.85, // share of hill segments with a hill at the cap (0.7 before)
-    hillHeightMax: 5.2, // metres, highest hill at the cap (4 before)
+    densityMax: 1 / 1, // obstacles per metre at the cap (1 / 8.5 before)
+    hillChanceMax: 1, // share of hill segments with a hill at the cap (0.7 before)
+    hillHeightMax: 7, // metres, highest hill at the cap (4 before)
     hillSteepness: 1.25, // at the cap hills are this much shorter for their height
   },
   render: {
