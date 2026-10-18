@@ -210,6 +210,15 @@ body {
   background: rgba(70, 20, 14, 0.6);
 }
 
+/* An energy drink doubles the sprint speed for a few seconds. */
+.panel.stamina.boosted {
+  background: rgba(24, 48, 120, 0.7);
+}
+
+.panel.stamina.boosted .bar .fill {
+  background: linear-gradient(90deg, #3a62c8, #d8dde6);
+}
+
 .panel.storm {
   text-align: right;
   min-width: 210px;
