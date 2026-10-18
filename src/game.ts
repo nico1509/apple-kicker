@@ -520,7 +520,7 @@ export class Game {
     this.landscapeReached = Math.max(this.landscapeReached, Math.floor(p / LANDSCAPE_LENGTH));
     this.iceMonster.dismiss();
     this.storm.reset();
-    this.storm.progress = p - CFG.storm.startBehind;
+    this.storm.placeBehind(p);
     // The storm's speed follows the position within the landscape by itself.
     this.elapsed = 0;
     this.quench();
@@ -1050,7 +1050,7 @@ export class Game {
     this.apple.reset(this.world.terrain.pathCenterX(progress + 1.2), -(progress + 1.2));
     this.apple.maxProgress = progress;
     this.landscapeReached = Math.max(this.landscapeReached, Math.floor(progress / LANDSCAPE_LENGTH));
-    this.storm.progress = progress - CFG.storm.startBehind;
+    this.storm.placeBehind(progress);
     this.world.prewarm(-progress);
     this.iceMonster.dismiss();
     this.quench();

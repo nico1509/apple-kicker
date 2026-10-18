@@ -297,6 +297,28 @@ try {
   const rg2 = await walkAndKick('right', 320, 0);
   check(rg2.after.appleMax > 1300, `apple moves through Greek obstacles (${rg2.after.appleMax.toFixed(1)} m)`);
 
+  // At every landscape start a storm that fell further back catches up to its start distance (58 m).
+  const stormBack = (player, apple, behind) =>
+    page.evaluate(([p, a, b]) => {
+      const g = window.__appleKicker.game;
+      g.player.reset(g.world.terrain.pathCenterX(p), -p, 0);
+      g.apple.reset(g.world.terrain.pathCenterX(a), -a);
+      g.storm.progress = Math.min(p, a) - b;
+    }, [player, apple, behind]);
+  await page.evaluate(() => window.__appleKicker.teleport(990));
+  await stormBack(990, 991.2, 200);
+  await simulate(1);
+  const cu0 = await state();
+  check(cu0.stormDistance > 185, `inside a landscape a far storm does not jump closer (${cu0.stormDistance.toFixed(1)} m)`);
+  await stormBack(1003, 1004.2, 200);
+  await simulate(8);
+  const cu1 = await state();
+  check(cu1.stormDistance > 40 && cu1.stormDistance <= 58.5 && cu1.state === 'playing', `at a landscape start the storm catches up to 58 m (${cu1.stormDistance.toFixed(1)} m)`);
+  await stormBack(1010, 1011.2, 30);
+  await simulate(0.5);
+  const cu2 = await state();
+  check(cu2.stormDistance < 30, `a storm closer than 58 m is not pushed back (${cu2.stormDistance.toFixed(1)} m)`);
+
   // Desert camel: within 20 m it spits at once and then every second; a hit pushes the player ~5 m.
   const camelAt = await page.evaluate(() => {
     const k = window.__appleKicker;
