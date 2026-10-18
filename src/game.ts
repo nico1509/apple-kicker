@@ -577,6 +577,8 @@ export class Game {
       const x = t.pathCenterX(q);
       const z = -q;
       if (this.world.rollingResistance(x, z) > t.rollingResistance(x, z)) return false;
+      // Not on a train roof or ramp in the subway.
+      if (t.deckHeight(x, z) > -Infinity) return false;
       const gy = this.world.groundHeight(x, z);
       let hit = false;
       this.world.colliders.forEachNear(z, (col) => {
@@ -1081,6 +1083,22 @@ export class Game {
     const out: Array<{ p: number; x: number; h: number }> = [];
     for (let k = 0; k < sections; k++) out.push(...this.world.terrain.gorgesIn(k));
     return out;
+  }
+
+  /** Blocks of trains of the subway section around progress p (testing only). */
+  debugSubway(p: number): { s: number; blocks: Array<{ p0: number; p1: number; lanes: string[] }>; trains: Array<{ x: number; p0: number; front: number; p1: number; ramp: boolean }> } | null {
+    const sec = this.world.terrain.subwayAt(p);
+    if (!sec) return null;
+    return {
+      s: sec.s,
+      blocks: sec.blocks.map((b) => ({ p0: b.p0, p1: b.p1, lanes: [...b.lanes] })),
+      trains: sec.trains.map((t) => ({ x: t.x, p0: t.p0, front: t.front, p1: t.p1, ramp: t.ramp })),
+    };
+  }
+
+  /** Put the player at (x, z), looking along yaw (testing only). */
+  debugPlayer(x: number, z: number, yaw = 0): void {
+    this.player.reset(x, z, yaw);
   }
 
   /** Put the apple at rest at (x, z) (testing only). */

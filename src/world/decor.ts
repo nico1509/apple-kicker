@@ -4,6 +4,7 @@ import { smoothstep } from '../utils/math';
 import { fbm2, hash3, mulberry32, rand, subSeed, type Rng } from '../utils/noise';
 import { ColliderStore, SURFACES, type Collider } from './colliders';
 import { landscapeAt, landscapeWeight } from './landscape';
+import { SUBWAY, subwayStraight, subwayWallHalf } from './subway';
 import { GORGE, HUT, ROAD, Terrain, type BiomeType, type Side } from './terrain';
 
 /** Collects instance transforms and colours, then bakes them into an InstancedMesh. */
@@ -207,11 +208,17 @@ export class Decor {
     return u > -16 - margin && u < HUT.depth + 4 + margin && Math.abs(x - hut.cx) < HUT.width / 2 + 5 + margin;
   }
 
+  /** True between the walls of the subway (plus `margin` metres), which the railyard fills. */
+  private inCutting(x: number, z: number, margin = 1.2): boolean {
+    if (subwayStraight(-z) <= 0) return false;
+    return Math.abs(x) < Math.min(subwayWallHalf(-z), SUBWAY.flare) + margin;
+  }
+
   private addCollider(chunk: number, c: Collider): void {
-    if (c.kind === 'box') return;
+    if (c.kind === 'box' || c.kind === 'ramp') return;
     const x = c.kind === 'capsule' || c.kind === 'wall' ? (c.ax + c.bx) / 2 : c.x;
     const z = c.kind === 'capsule' || c.kind === 'wall' ? (c.az + c.bz) / 2 : c.z;
-    if (!this.inGorge(x, z)) this.colliders.add(chunk, c);
+    if (!this.inGorge(x, z) && !this.inCutting(x, z)) this.colliders.add(chunk, c);
   }
 
   private place(
@@ -222,7 +229,7 @@ export class Decor {
     color: THREE.Color,
     tiltX = 0, tiltZ = 0,
   ): void {
-    if (this.inGorge(x, z)) return;
+    if (this.inGorge(x, z) || this.inCutting(x, z)) return;
     this.pos.set(x, y, z);
     this.scl.set(sx, sy, sz);
     this.euler.set(tiltX, yaw, tiltZ, 'YXZ');
@@ -242,6 +249,8 @@ export class Decor {
     switch (biome) {
       case 'forest':
         return r < 0.45 ? CANOPY_COLORS.green : r < 0.75 ? CANOPY_COLORS.yellowGreen : r < 0.9 ? CANOPY_COLORS.gold : CANOPY_COLORS.orange;
+      case 'railyard':
+        return r < 0.45 ? CANOPY_COLORS.orange : r < 0.75 ? CANOPY_COLORS.gold : r < 0.9 ? CANOPY_COLORS.rust : CANOPY_COLORS.yellowGreen;
       case 'hedge':
         return r < 0.5 ? CANOPY_COLORS.green : r < 0.8 ? CANOPY_COLORS.yellowGreen : CANOPY_COLORS.gold;
       default:
@@ -1717,6 +1726,14 @@ export class Decor {
         if (Math.abs(x) > CFG.chunk.halfWidth - 1.5) continue;
         if (this.inGorge(x, z, 2.5) || this.nearHut(x, z)) continue;
         switch (biome) {
+          case 'railyard': {
+            // Autumn trees on the rim of the cutting, behind the houses.
+            if (d > 21 && rng() < 0.12 && !tooClose(x, z, 3)) {
+              this.addBroadleaf(b, i, x, z, rng, biome, rng() < 0.4);
+              placed.push([x, z, 2]);
+            }
+            break;
+          }
           case 'forest': {
             if (d < 3.2) {
               if (rng() < 0.5 && !tooClose(x, z, 1.2)) {

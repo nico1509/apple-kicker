@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { CFG } from '../config';
 import { mulberry32, rand, subSeed, type Rng } from '../utils/noise';
 import { sphereContact, type ColliderStore, type Contact } from './colliders';
+import { inSubwayCore, SUBWAY, SUBWAY_CORE, type SubwaySection } from './subway';
 import { Terrain } from './terrain';
 
 interface Bottle {
@@ -10,6 +11,9 @@ interface Bottle {
   baseY: number;
   phase: number;
 }
+
+/** In the subway no two rows of bottles along a way are further apart than this. */
+const FILL_GAP = 18;
 
 /** Metres a bottle may be moved along the path to keep clear of an obstacle. */
 const NUDGE = 1.5;
@@ -51,6 +55,8 @@ export class Bottles {
   /** Progress of every bottle so far (see spot()). */
   private readonly spots: number[] = [];
   private readonly spotRng: Rng;
+  /** Rows of bottles of every subway section, by its start. */
+  private readonly rows = new Map<number, Array<{ key: string; x: number; p: number }>>();
   private readonly contact: Contact = { nx: 0, ny: 0, nz: 0, depth: 0, surface: { restitution: 0, friction: 0 } };
 
   constructor(
@@ -137,6 +143,8 @@ export class Bottles {
       // The path ends at the cabin of the story mode.
       const hut = this.terrain.hut();
       if (hut && s > hut.p - 4) break;
+      // In the subway the bottles stand in rows instead.
+      if (inSubwayCore(s)) continue;
       const key = `${k}`;
       if (this.taken.has(key)) continue;
       const dx = rand(rng, -0.4, 0.4);
@@ -150,25 +158,85 @@ export class Bottles {
         if (this.clear(x, gy, z)) break;
       }
       // If every spot is blocked the bottle still floats there: the gap matters more.
-      const pivot = new THREE.Group();
-      // The bottle is centred on the tilt group, which leans it; the pivot spins it.
-      const tilt = new THREE.Group();
-      tilt.rotation.z = CFG.thirst.tilt;
-      const body = new THREE.Mesh(this.bodyGeo, this.glassMat);
-      body.castShadow = true;
-      const label = new THREE.Mesh(this.labelGeo, this.labelMat);
-      const neck = new THREE.Mesh(this.neckGeo, this.neckMat);
-      const cap = new THREE.Mesh(this.capGeo, this.capMat);
-      for (const m of [body, label, neck, cap]) m.position.y = -HEIGHT / 2;
-      tilt.add(body, label, neck, cap);
-      pivot.add(tilt);
-      const baseY = gy + CFG.thirst.hoverHeight;
-      pivot.position.set(x, baseY, z);
-      pivot.name = 'bottle';
-      group.add(pivot);
-      list.push({ key, pivot, baseY, phase: rng() * Math.PI * 2 });
+      this.addBottle(group, list, key, x, gy, z, rng);
+    }
+    const sec = this.terrain.subwayAt(p0) ?? this.terrain.subwayAt(p1);
+    if (sec) {
+      for (const r of this.subwayRows(sec)) {
+        if (r.p < p0 || r.p >= p1 || this.taken.has(r.key)) continue;
+        const gy = Math.max(this.terrain.groundHeight(r.x, -r.p), this.terrain.deckHeight(r.x, -r.p));
+        this.addBottle(group, list, r.key, r.x, gy, -r.p, rng);
+      }
     }
     return group;
+  }
+
+  /**
+   * In the subway the bottles stand in rows like the coins of the arcade game:
+   * along every free track and up every ramp onto the roof, so that they show
+   * the way, and a short row in the open between two blocks of trains.
+   */
+  private subwayRows(sec: SubwaySection): Array<{ key: string; x: number; p: number }> {
+    let rows = this.rows.get(sec.s);
+    if (rows) return rows;
+    rows = [];
+    const rng = mulberry32(subSeed(this.terrain.seed, 1750 + sec.s));
+    sec.blocks.forEach((b, bi) => {
+      b.lanes.forEach((l, lane) => {
+        const x = SUBWAY.lanes[lane];
+        if (l === 'free') {
+          // Groups of four all along the free track.
+          for (let j = 0, p = b.p0 + 2; p < b.p1; j++, p += j % 4 ? 2.5 : 7.5) rows!.push({ key: `w${sec.s}-${bi}-${lane}-${j}`, x, p });
+        } else if (l === 'ramp') {
+          // Up the ramp, then on along the roof.
+          const t = sec.trains.find((t) => t.lane === lane && t.p0 >= b.p0 && t.p0 < b.p1);
+          if (!t) return;
+          let j = 0;
+          for (let p = t.p0 + 1.5; p < t.p1 - 1; j++, p += j < 8 ? 2.5 : 10) rows!.push({ key: `w${sec.s}-${bi}-${lane}-${j}`, x, p });
+          // A short train ends before the others: on along the track behind it.
+          for (let p = t.p1 + 4; p < b.p1; j++, p += 10) rows!.push({ key: `w${sec.s}-${bi}-${lane}-${j}`, x, p });
+        }
+      });
+      const x = SUBWAY.lanes[Math.floor(rng() * 3)];
+      for (let j = 0; j < 3; j++) rows!.push({ key: `w${sec.s}-${bi}-g-${j}`, x, p: b.p1 + 2.5 + j * 2.5 });
+    });
+    // No long dry stretch: fill gaps on the middle track (before the first and
+    // after the last block of trains), overlapping a little with the usual
+    // bottles before and after the subway.
+    const ps = rows.map((r) => r.p).sort((a, b) => a - b);
+    const free = (p: number): boolean => sec.blocks.every((b) => p < b.p0 - 1 || p > b.p1 + 1 || b.lanes[1] === 'free');
+    let prev = sec.s + SUBWAY_CORE.from - FILL_GAP;
+    let n = 0;
+    for (const next of [...ps, sec.s + SUBWAY_CORE.to + FILL_GAP]) {
+      for (let p = prev + FILL_GAP; p < next - FILL_GAP / 2; p += FILL_GAP) {
+        if (!free(p)) continue;
+        for (let j = 0; j < 3; j++) rows.push({ key: `w${sec.s}-f${n}-${j}`, x: 0, p: p + j * 2.5 });
+        n++;
+      }
+      prev = Math.max(prev, next);
+    }
+    this.rows.set(sec.s, rows);
+    return rows;
+  }
+
+  private addBottle(group: THREE.Group, list: Bottle[], key: string, x: number, gy: number, z: number, rng: Rng): void {
+    const pivot = new THREE.Group();
+    // The bottle is centred on the tilt group, which leans it; the pivot spins it.
+    const tilt = new THREE.Group();
+    tilt.rotation.z = CFG.thirst.tilt;
+    const body = new THREE.Mesh(this.bodyGeo, this.glassMat);
+    body.castShadow = true;
+    const label = new THREE.Mesh(this.labelGeo, this.labelMat);
+    const neck = new THREE.Mesh(this.neckGeo, this.neckMat);
+    const cap = new THREE.Mesh(this.capGeo, this.capMat);
+    for (const m of [body, label, neck, cap]) m.position.y = -HEIGHT / 2;
+    tilt.add(body, label, neck, cap);
+    pivot.add(tilt);
+    const baseY = gy + CFG.thirst.hoverHeight;
+    pivot.position.set(x, baseY, z);
+    pivot.name = 'bottle';
+    group.add(pivot);
+    list.push({ key, pivot, baseY, phase: rng() * Math.PI * 2 });
   }
 
   private clear(x: number, gy: number, z: number): boolean {

@@ -5,6 +5,7 @@ import { Cabin } from './cabin';
 import { ColliderStore } from './colliders';
 import { Decor } from './decor';
 import { Obstacles } from './obstacles';
+import { Railyard } from './railyard';
 import { Terrain } from './terrain';
 
 interface Chunk {
@@ -14,6 +15,7 @@ interface Chunk {
   obstacles: THREE.Group;
   bottles: THREE.Group;
   cabin: THREE.Group | null;
+  railyard: THREE.Group | null;
 }
 
 /** Time budget per frame for incremental chunk generation. */
@@ -32,6 +34,8 @@ export class World {
   readonly bottles: Bottles;
   /** The cabin at the end of the story mode (builds nothing in the endless mode). */
   readonly cabin: Cabin;
+  /** Tracks, trains and walls of the subway. */
+  readonly railyard: Railyard;
   readonly group = new THREE.Group();
   private readonly chunks = new Map<number, Chunk>();
   private readonly groundMat = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true });
@@ -45,6 +49,7 @@ export class World {
     this.decor = new Decor(this.terrain, this.colliders);
     this.obstacles = new Obstacles(this.terrain, this.colliders);
     this.cabin = new Cabin(this.terrain, this.colliders);
+    this.railyard = new Railyard(this.terrain, this.colliders);
     this.bottles = new Bottles(this.terrain, this.colliders);
     this.group.name = 'world';
   }
@@ -69,12 +74,14 @@ export class World {
     const decor = this.decor.buildChunk(i);
     yield;
     const obstacles = this.obstacles.buildChunk(i);
+    const railyard = yield* this.railyard.buildChunkGen(i);
     const cabin = this.cabin.buildChunk(i);
     // After the obstacles so the bottles can keep clear of them.
     const bottles = this.bottles.buildChunk(i);
     this.group.add(ground, far, decor, obstacles, bottles);
     if (cabin) this.group.add(cabin);
-    this.chunks.set(i, { ground, far, decor, obstacles, bottles, cabin });
+    if (railyard) this.group.add(railyard);
+    this.chunks.set(i, { ground, far, decor, obstacles, bottles, cabin, railyard });
     this.generated = Math.max(this.generated, i);
   }
 
@@ -92,6 +99,10 @@ export class World {
     if (c.cabin) {
       this.group.remove(c.cabin);
       Decor.disposeGroup(c.cabin);
+    }
+    if (c.railyard) {
+      this.group.remove(c.railyard);
+      Railyard.disposeGroup(c.railyard);
     }
     c.ground.geometry.dispose();
     c.far.geometry.dispose();
@@ -144,16 +155,32 @@ export class World {
     return this.pending !== null;
   }
 
-  groundHeight(x: number, z: number): number {
-    return this.terrain.groundHeight(x, z);
+  /**
+   * Height of what can be stood on at (x, z): the ground, or the roof or ramp
+   * of a train in the subway. Roofs and ramps higher than `top` do not count
+   * (seen from beside a train they are its side, which the colliders handle).
+   */
+  groundHeight(x: number, z: number, top = Infinity): number {
+    const g = this.terrain.groundHeight(x, z);
+    const deck = this.terrain.deckHeight(x, z);
+    return deck > g && deck <= top ? deck : g;
   }
 
-  groundNormal(x: number, z: number, out: THREE.Vector3): THREE.Vector3 {
-    return this.terrain.groundNormal(x, z, out);
+  groundNormal(x: number, z: number, out: THREE.Vector3, top = Infinity): THREE.Vector3 {
+    if (this.terrain.deckHeight(x, z) === -Infinity) return this.terrain.groundNormal(x, z, out);
+    const e = 0.12;
+    const t = top + 0.5;
+    const hx = this.groundHeight(x + e, z, t) - this.groundHeight(x - e, z, t);
+    const hz = this.groundHeight(x, z + e, t) - this.groundHeight(x, z - e, t);
+    // A step at the edge of a roof is not a slope.
+    if (Math.abs(hx) > 0.2 || Math.abs(hz) > 0.2) return out.set(0, 1, 0);
+    return out.set(-hx, 2 * e, -hz).normalize();
   }
 
-  /** Total rolling resistance (ground type + puddles, less on glassy ice) in m/s². */
-  rollingResistance(x: number, z: number): number {
+  /** Total rolling resistance (ground type + puddles, less on glassy ice) in m/s²; y is the height of the contact. */
+  rollingResistance(x: number, z: number, y = -Infinity): number {
+    // The smooth roofs and ramps of the trains.
+    if (y > this.terrain.groundHeight(x, z) + 0.3) return 0.8;
     return Math.max(0.2, this.terrain.rollingResistance(x, z) + this.colliders.mudAt(x, z));
   }
 
@@ -164,6 +191,7 @@ export class World {
     this.obstacles.dispose();
     this.bottles.dispose();
     this.cabin.dispose();
+    this.railyard.dispose();
     this.groundMat.dispose();
     this.farMat.dispose();
     this.colliders.clear();

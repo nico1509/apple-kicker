@@ -12,6 +12,8 @@ export interface AppleEvents {
 
 const SUBSTEP = 1 / 240;
 const MAX_SUBSTEPS = 12;
+/** A roof or ramp at most this much above the bottom of the apple counts as ground. */
+const STEP_UP = 0.15;
 
 const DUMMY_SURFACE: Surface = { restitution: 0, friction: 0 };
 
@@ -127,7 +129,7 @@ export class Apple {
   /** Launch the apple. `dir` is a unit vector including the elevation. */
   kick(dir: THREE.Vector3, speed: number, curl: number, extra: THREE.Vector3): void {
     this.vel.copy(dir).multiplyScalar(speed).add(extra);
-    this.pos.y = Math.max(this.pos.y, this.world.groundHeight(this.pos.x, this.pos.z) + this.radius + 0.01);
+    this.pos.y = Math.max(this.pos.y, this.world.groundHeight(this.pos.x, this.pos.z, this.pos.y) + this.radius + 0.01);
     this.curl = curl;
     this.resting = false;
     this.onGround = false;
@@ -193,7 +195,7 @@ export class Apple {
 
     if (this.resting) {
       // Wake up if the ground vanished underneath (should not happen) or we got pushed.
-      const gy = world.groundHeight(pos.x, pos.z);
+      const gy = world.groundHeight(pos.x, pos.z, pos.y - r + STEP_UP);
       if (pos.y - r > gy + 0.02) this.resting = false;
       else return;
     }
@@ -216,10 +218,12 @@ export class Apple {
     pos.addScaledVector(vel, dt);
 
     // Ground contact.
-    const gy = world.groundHeight(pos.x, pos.z);
+    // Roofs and ramps of trains count as ground only from above.
+    const top = pos.y - r + STEP_UP;
+    const gy = world.groundHeight(pos.x, pos.z, top);
     this.onGround = false;
     if (pos.y - r < gy) {
-      const n = world.groundNormal(pos.x, pos.z, this.normal);
+      const n = world.groundNormal(pos.x, pos.z, this.normal, top);
       pos.y = gy + r;
       const vn = vel.dot(n);
       if (vn < 0) {
@@ -243,7 +247,7 @@ export class Apple {
       // Rolling resistance.
       const hs = Math.hypot(vel.x, vel.z);
       if (hs > 0) {
-        const rr = world.rollingResistance(pos.x, pos.z);
+        const rr = world.rollingResistance(pos.x, pos.z, pos.y - r);
         const dec = rr * dt;
         const f = Math.max(0, hs - dec) / hs;
         vel.x *= f;

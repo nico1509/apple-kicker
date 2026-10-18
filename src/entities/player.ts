@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { CFG, type Foot } from '../config';
 import { clamp, damp, DEG, lerp } from '../utils/math';
-import { sphereContact, type Contact } from '../world/colliders';
+import { rampTop, sphereContact, type Contact } from '../world/colliders';
 import { World } from '../world/world';
 import { Apple } from './apple';
 import { Input, type KickRequest } from './input';
@@ -65,6 +65,8 @@ export class Player {
   private inBush = 0;
   /** Displacement still to be applied from a shove (e.g. camel spit), in metres. */
   private shoveX = 0;
+  /** Downward speed while dropping off a train roof. */
+  private fallSpeed = 0;
   /**
    * Asked when a swing reaches its contact point. Returning true means the foot
    * hit something else (a gnome) and the apple is not kicked.
@@ -120,6 +122,7 @@ export class Player {
     this.pos.set(x, this.world.groundHeight(x, z), z);
     this.vel.set(0, 0, 0);
     this.shoveX = this.shoveZ = 0;
+    this.fallSpeed = 0;
     this.yaw = yaw;
     this.pitch = -0.25;
     this.stamina = 1;
@@ -269,6 +272,10 @@ export class Player {
       } else if (col.kind === 'box') {
         if (col.maxY < this.pos.y + 0.25 || col.minY > this.pos.y + 1.7) return;
         this.pushOutBox(col.minX, col.minZ, col.maxX, col.maxZ, pr);
+      } else if (col.kind === 'ramp') {
+        // The side of a ramp; walking up its slope is terrain following.
+        if (rampTop(col, -this.pos.z) < this.pos.y + 0.25) return;
+        this.pushOutBox(col.minX, -col.pHigh, col.maxX, -col.pLow, pr);
       } else if (col.kind === 'wall') {
         const abx = col.bx - col.ax;
         const abz = col.bz - col.az;
@@ -279,9 +286,19 @@ export class Player {
     });
 
     // ----- terrain following
-    const gy = this.world.groundHeight(this.pos.x, this.pos.z);
-    this.pos.y = damp(this.pos.y, gy, 30, dt);
-    if (Math.abs(this.pos.y - gy) > 0.6) this.pos.y = gy;
+    // Train roofs and ramps carry the player from above; off the end of a roof they fall.
+    const gy = this.world.groundHeight(this.pos.x, this.pos.z, this.pos.y + 0.6);
+    if (this.pos.y > gy + 0.6 || this.fallSpeed > 0) {
+      this.fallSpeed += 9.81 * dt;
+      this.pos.y -= this.fallSpeed * dt;
+      if (this.pos.y <= gy) {
+        this.pos.y = gy;
+        this.fallSpeed = 0;
+      }
+    } else {
+      this.pos.y = damp(this.pos.y, gy, 30, dt);
+      if (Math.abs(this.pos.y - gy) > 0.6) this.pos.y = gy;
+    }
 
     // ----- walk cycle, bob, footsteps
     const speed = Math.hypot(this.vel.x, this.vel.z);
