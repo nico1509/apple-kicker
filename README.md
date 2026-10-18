@@ -32,19 +32,27 @@ Auf schwachen Rechnern `?quality=low` oder `?quality=medium` an die Adresse hän
 | `W` `A` `S` `D` | laufen |
 | `Shift` | sprinten (begrenzte Ausdauer; ganz leer gesprintet bist du eine Sekunde aus der Puste, danach ist sie wieder voll) |
 | Maus | umsehen |
-| **Linke Maustaste** halten, ziehen, loslassen | Kick mit dem **linken** Fuß |
-| **Rechte Maustaste** halten, ziehen, loslassen | Kick mit dem **rechten** Fuß |
+| **Linke Maustaste** halten, ziehen, loslassen | Kick |
 | kurzer Klick | kleiner Stupser nach vorn |
 | `Leertaste` beim Loslassen halten | hoher Lupfer (über Wurzeln und Baumstämme) |
-| `Q` / `E` | Stupser mit dem linken / rechten Fuß |
 | `M` | Ton an/aus |
 | `P` / `Esc` | Pause (im Pausenmenü: `R` = Neustart) |
 | `Enter` / `R` | nach einem verlorenen Leben: weitermachen / neu starten |
 
 Die **Zugrichtung** bestimmt die Schussrichtung (nach oben ziehen = geradeaus),
-die **Zuglänge** die Kraft. Der Apfel muss dicht vor dem jeweiligen Fuß liegen –
-der linke Fuß erreicht Äpfel links von der Mitte, der rechte rechts. Jeder Fuß gibt
-dem Apfel außerdem einen leichten Drall nach innen (linker Fuß: nach rechts, rechter Fuß: nach links).
+die **Zuglänge** die Kraft. Der Apfel muss dicht vor deinen Füßen liegen.
+
+#### Touch-Steuerung
+
+Auf Handys und Tablets erscheinen automatisch halbtransparente Bedienelemente:
+
+| Eingabe | Aktion |
+| --- | --- |
+| Stick hoch / runter | vorwärts / rückwärts laufen (bis über den Rand geschoben = sprinten) |
+| Stick links / rechts | nach links / rechts drehen |
+| wischen (irgendwo sonst auf dem Bildschirm) | Kick, wie mit der Maus: Wischrichtung = Schussrichtung, Wischlänge = Kraft; kurz tippen = Stupser |
+| roter Knopf neben dem Stick halten | hoher Lupfer |
+| Pause-Knopf rechts oben | Pause |
 
 ### Regeln
 

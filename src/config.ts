@@ -49,7 +49,6 @@ export const CFG = {
     chipElevationDeg: 52,
     chipSpeedFactor: 0.78,
     reach: 1.85, // metres from the hips to the apple
-    curl: 0.12, // side spin per foot: a light, visible bend that keeps a straight kick on the lane
   },
   thirst: {
     drainSeconds: 17.5, // a full thirst bar empties in this time

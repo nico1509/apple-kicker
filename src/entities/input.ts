@@ -19,15 +19,23 @@ export interface KickRequest {
 }
 
 /**
- * Keyboard + mouse input. Mouse movement rotates the view unless a mouse
- * button is held: then the movement is accumulated into a kick drag
- * (left button = left foot, right button = right foot).
+ * Keyboard + mouse input. Mouse movement rotates the view unless the left
+ * mouse button is held: then the movement is accumulated into a kick drag
+ * with the right foot.
  */
 export class Input {
   enabled = false;
   readonly keys = new Set<string>();
   drag: DragState | null = null;
   readonly kicks: KickRequest[] = [];
+  /** Touch movement, -1..1 each (y < 0 = forward). */
+  readonly moveStick = { x: 0, y: 0 };
+  /** Movement stick pushed past its rim: sprint. */
+  sprintStick = false;
+  /** Touch turning, -1..1 (> 0 = right): turns the view at a rate while held. */
+  turnStick = 0;
+  /** Touch chip button held. */
+  chipButton = false;
   private lookDX = 0;
   private lookDY = 0;
   private lastClientX: number | null = null;
@@ -38,9 +46,6 @@ export class Input {
     this.keys.add(e.code);
     if (!this.enabled) return;
     if (e.code === 'Tab' || e.code === 'Space' || e.code.startsWith('Arrow')) e.preventDefault();
-    if (e.repeat) return;
-    if (e.code === 'KeyQ') this.kicks.push({ foot: 'left', dx: 0, dy: 0, chip: this.keys.has('Space'), tap: true, lookAfter: 0 });
-    if (e.code === 'KeyE') this.kicks.push({ foot: 'right', dx: 0, dy: 0, chip: this.keys.has('Space'), tap: true, lookAfter: 0 });
   };
   private readonly onKeyUp = (e: KeyboardEvent): void => {
     this.keys.delete(e.code);
@@ -74,15 +79,13 @@ export class Input {
   };
   private readonly onMouseDown = (e: MouseEvent): void => {
     if (!this.enabled) return;
-    if (e.button !== 0 && e.button !== 2) return;
+    if (e.button !== 0) return;
     e.preventDefault();
     if (this.drag) return; // one kick at a time
-    this.drag = { foot: e.button === 0 ? 'left' : 'right', dx: 0, dy: 0 };
+    this.drag = { foot: 'right', dx: 0, dy: 0 };
   };
   private readonly onMouseUp = (e: MouseEvent): void => {
-    if (!this.drag) return;
-    const foot: Foot = e.button === 0 ? 'left' : 'right';
-    if (foot !== this.drag.foot) return;
+    if (!this.drag || e.button !== 0) return;
     e.preventDefault();
     this.release();
   };
@@ -92,6 +95,7 @@ export class Input {
   private readonly onBlur = (): void => {
     this.keys.clear();
     this.drag = null;
+    this.resetTouch();
   };
   private readonly onMouseLeave = (): void => {
     // Without pointer lock the cursor may re-enter anywhere: do not turn the
@@ -116,7 +120,34 @@ export class Input {
     if (!this.drag) return;
     const d = this.drag;
     this.drag = null;
-    this.kicks.push({ foot: d.foot, dx: d.dx, dy: d.dy, chip: this.keys.has('Space'), tap: false, lookAfter: 0 });
+    this.kicks.push({ foot: d.foot, dx: d.dx, dy: d.dy, chip: this.chipHeld(), tap: false, lookAfter: 0 });
+  }
+
+  /** Start a kick drag from a touch swipe (like holding the left mouse button). */
+  startDrag(): boolean {
+    if (!this.enabled || this.drag) return false;
+    this.drag = { foot: 'right', dx: 0, dy: 0 };
+    return true;
+  }
+
+  /** Add swipe movement to the current kick drag. */
+  dragBy(dx: number, dy: number): void {
+    if (!this.drag) return;
+    this.drag.dx += dx;
+    this.drag.dy += dy;
+  }
+
+  /** True while a chip is asked for (space bar or the touch button). */
+  chipHeld(): boolean {
+    return this.keys.has('Space') || this.chipButton;
+  }
+
+  /** Let go of all touch controls (pause, game over, controls hidden). */
+  resetTouch(): void {
+    this.moveStick.x = this.moveStick.y = 0;
+    this.turnStick = 0;
+    this.sprintStick = false;
+    this.chipButton = false;
   }
 
   /** Cancel any pending drag and queued kick requests (pause, game over). */
