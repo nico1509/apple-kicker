@@ -230,6 +230,7 @@ export class Game {
     window.addEventListener('resize', this.onResize);
     window.addEventListener('blur', this.onBlur);
     document.addEventListener('pointerlockchange', this.onPointerLockChange);
+    this.canvas.addEventListener('mousedown', this.onCanvasMouseDown);
     window.addEventListener('keydown', this.onKeyDown);
     this.onResize();
   }
@@ -627,22 +628,36 @@ export class Game {
     this.hud.showWon(score, this.runTime, this.best, isRecord, unlockedNow);
   }
 
-  /** Enter fullscreen when play starts; only works right after a click or key press, so failures are ignored. */
-  private requestFullscreen(): void {
+  /**
+   * Enter fullscreen when play starts; only works right after a click or key press, so failures are ignored.
+   * Returns a promise that settles once the switch is done, or null if nothing was requested.
+   */
+  private requestFullscreen(): Promise<void> | null {
     const doc = document as Document & { webkitFullscreenElement?: Element | null };
-    if (document.fullscreenElement || doc.webkitFullscreenElement) return;
+    if (document.fullscreenElement || doc.webkitFullscreenElement) return null;
     const el = document.documentElement as HTMLElement & { webkitRequestFullscreen?: () => void };
     try {
-      if (el.requestFullscreen) el.requestFullscreen({ navigationUI: 'hide' }).catch(() => undefined);
-      else el.webkitRequestFullscreen?.();
+      if (el.requestFullscreen) return el.requestFullscreen({ navigationUI: 'hide' }).catch(() => undefined);
+      el.webkitRequestFullscreen?.();
     } catch {
       /* fullscreen unavailable (e.g. iPhone): the game runs in the normal window */
     }
+    return null;
   }
 
+  /**
+   * Fullscreen first, then pointer lock: browsers drop a pointer lock requested
+   * while the switch to fullscreen is still running, which left a free cursor.
+   */
   private requestPointerLock(): void {
-    this.requestFullscreen();
     this.pointerLockWanted = true;
+    const fullscreen = this.requestFullscreen();
+    if (fullscreen) void fullscreen.then(() => this.lockPointer());
+    else this.lockPointer();
+  }
+
+  private lockPointer(): void {
+    if (!this.pointerLockWanted || this.state !== 'playing' || document.pointerLockElement === this.canvas) return;
     try {
       const p = this.canvas.requestPointerLock() as unknown;
       if (p && typeof (p as Promise<void>).catch === 'function') (p as Promise<void>).catch(() => undefined);
@@ -650,6 +665,11 @@ export class Game {
       /* pointer lock unavailable: the game still works with plain mouse movement */
     }
   }
+
+  /** If the pointer lock was refused anyway, the next click in the game grabs the cursor. */
+  private readonly onCanvasMouseDown = (): void => {
+    this.lockPointer();
+  };
 
   private readonly onPointerLockChange = (): void => {
     if (document.pointerLockElement !== this.canvas && this.pointerLockWanted && this.state === 'playing') {
@@ -1144,6 +1164,7 @@ export class Game {
     window.removeEventListener('resize', this.onResize);
     window.removeEventListener('blur', this.onBlur);
     document.removeEventListener('pointerlockchange', this.onPointerLockChange);
+    this.canvas.removeEventListener('mousedown', this.onCanvasMouseDown);
     window.removeEventListener('keydown', this.onKeyDown);
     this.input.dispose();
     this.world.dispose();
