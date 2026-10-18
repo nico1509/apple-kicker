@@ -611,26 +611,23 @@ try {
     const later = k.state().boosted;
     grab(cans.find((b) => Math.hypot(b.x - g.player.pos.x, b.z - g.player.pos.z) > 3));
     const again = k.state().boosted;
-    const speed = () => {
+    // The sprint speed the player aims for, on the same spot with and without the boost.
+    const speed = (boost) => {
+      k.teleport(300);
+      g.debugThirst(1);
+      if (boost) g.player.boost(4);
       k.look(0, 0);
-      k.simulate(1, ['KeyW', 'ShiftLeft']);
-      const p0 = g.player.pos.clone();
-      k.simulate(1, ['KeyW', 'ShiftLeft']);
-      return Math.hypot(g.player.pos.x - p0.x, g.player.pos.z - p0.z);
+      k.simulate(0.1, ['KeyW', 'ShiftLeft']);
+      return Math.hypot(g.player.intentX, g.player.intentZ);
     };
-    k.teleport(300);
-    g.debugThirst(1);
-    const normal = speed();
-    k.teleport(400);
-    g.debugThirst(1);
-    g.player.boost(4);
-    const boosted = speed();
-    k.simulate(3);
+    const normal = speed(false);
+    const boosted = speed(true);
+    k.simulate(4);
     return { n: list.length, cans: all, first, later, again, normal, boosted, end: k.state().boosted };
   });
   check(energy.cans === energy.n, `the subway has energy drink cans instead of bottles (${energy.cans}/${energy.n})`);
   check(Math.abs(energy.first - 4) < 0.05 && Math.abs(energy.later - 2) < 0.1 && Math.abs(energy.again - 4) < 0.05, `a can boosts for 4 s and another one restarts it (${energy.first.toFixed(2)}, ${energy.later.toFixed(2)}, ${energy.again.toFixed(2)})`);
-  check(energy.boosted > energy.normal * 1.8 && energy.end === 0, `the boost doubles the sprint speed (${energy.normal.toFixed(1)} → ${energy.boosted.toFixed(1)} m/s)`);
+  check(Math.abs(energy.boosted / energy.normal - 2) < 0.01 && energy.end === 0, `the boost doubles the sprint speed (${energy.normal.toFixed(1)} → ${energy.boosted.toFixed(1)} m/s)`);
   const respawnOnTrain = await page.evaluate((t) => window.__appleKicker.game.respawnClear(t.front + 2), sub.trains.find((t) => t.x === 0));
   check(!respawnOnTrain, 'nobody respawns on a train');
 
