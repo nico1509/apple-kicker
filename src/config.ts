@@ -68,6 +68,8 @@ export const CFG = {
     rubberBandDistance: 140, // free lead at the start of every landscape ...
     rubberBandMin: 70, // ... shrinking linearly to this at its end
     rubberBandGain: 0.03,
+    catchUpSpeed: 6, // extra m/s while the front catches up to startBehind at a landscape start ...
+    catchUpGain: 0.5, // ... plus this per metre it is still too far back
     rainStart: 42, // rain becomes visible below this distance
     darkStart: 120, // the storm becomes visible in the sky behind the player below this distance
   },

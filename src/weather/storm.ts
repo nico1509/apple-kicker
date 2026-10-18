@@ -39,6 +39,10 @@ export class Storm {
   private nextFlash = 6;
   private readonly pendingThunder: Array<{ at: number; volume: number }> = [];
   private time = 0;
+  /** Landscape the chased one is in; entering the next one pulls the front up. */
+  private landscape = 0;
+  /** Pulling the front up to the standard distance at a landscape start. */
+  private catchingUp = false;
   private readonly cloudMatDark = new THREE.MeshLambertMaterial({ color: 0x5a6270, emissive: 0x151820, flatShading: true, fog: false });
   private readonly cloudMatMid = new THREE.MeshLambertMaterial({ color: 0x7c8591, emissive: 0x1c2028, flatShading: true, fog: false });
   private readonly cloudEmissiveDark = new THREE.Color(0x151820);
@@ -108,6 +112,8 @@ export class Storm {
 
   reset(): void {
     this.progress = -CFG.storm.startBehind;
+    this.landscape = 0;
+    this.catchingUp = false;
     this.speed = CFG.storm.baseSpeed;
     this.intensity = 0;
     this.darkness = 0;
@@ -116,6 +122,13 @@ export class Storm {
     this.nextFlash = 8;
     this.pendingThunder.length = 0;
     this.bolt.visible = false;
+  }
+
+  /** Put the front the standard distance behind `chasedProgress`, as at the start of a run. */
+  placeBehind(chasedProgress: number): void {
+    this.progress = chasedProgress - CFG.storm.startBehind;
+    this.landscape = Math.floor(Math.max(0, chasedProgress) / LANDSCAPE_LENGTH);
+    this.catchingUp = false;
   }
 
   distanceTo(progress: number): number {
@@ -161,8 +174,27 @@ export class Storm {
     let v = S.baseSpeed + (S.topSpeed - S.baseSpeed) * t;
     const lead = S.rubberBandDistance + (S.rubberBandMin - S.rubberBandDistance) * t;
     if (chasedDist > lead) v += (chasedDist - lead) * S.rubberBandGain;
+
+    // At the start of every landscape a front that has fallen further back
+    // than at the start of a run quickly catches up to that distance.
+    const k = Math.floor(Math.max(0, chasedProgress) / LANDSCAPE_LENGTH);
+    if (k > this.landscape) {
+      this.landscape = k;
+      this.catchingUp = chasedDist > S.startBehind;
+    }
+    if (this.catchingUp) {
+      if (chasedDist > S.startBehind) v += S.catchUpSpeed + (chasedDist - S.startBehind) * S.catchUpGain;
+      else this.catchingUp = false;
+    }
     this.speed = v;
-    if (advance) this.progress += v * dt;
+    if (advance) {
+      this.progress += v * dt;
+      // Never overshoot the standard distance while catching up.
+      if (this.catchingUp && this.distanceTo(chasedProgress) <= S.startBehind) {
+        this.progress = chasedProgress - S.startBehind;
+        this.catchingUp = false;
+      }
+    }
 
     // ----- intensity & darkness
     this.intensity = clamp(1 - dist / S.rainStart, 0, 1);
