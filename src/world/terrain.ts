@@ -3,6 +3,7 @@ import { CFG } from '../config';
 import { clamp, lerp, smoothstep } from '../utils/math';
 import { fbm1, fbm2, hash3, mulberry32, noise1, subSeed, valueNoise2 } from '../utils/noise';
 import { HUT_PROGRESS, LANDSCAPE_LENGTH, landscapeOfIndex, landscapeWeight, storyMode, type Landscape } from './landscape';
+import { buildSubwaySection, SUBWAY, subwayCut, subwayStart, subwayStraight, subwayWallHalf, trainDeck, type SubwaySection } from './subway';
 
 /**
  * Coordinate conventions
@@ -19,7 +20,8 @@ export type BiomeType =
   | 'dunes' | 'oasis' | 'ruins' | 'blackdesert'
   | 'snowfield' | 'shore' | 'rookery'
   | 'townhouses' | 'gardens' | 'fallow'
-  | 'snowwood';
+  | 'snowwood'
+  | 'railyard';
 export type Side = -1 | 1;
 
 export interface BiomeMix {
@@ -45,6 +47,7 @@ const SLOPE_BIAS: Record<BiomeType, number> = {
   snowfield: 0.06, shore: -0.16, rookery: 0.1,
   townhouses: 0, gardens: 0.03, fallow: 0.04,
   snowwood: 0.05,
+  railyard: 0.02,
 };
 /** Rolling resistance (m/s²) of the ground beside the lane. */
 const ROLL_RES: Record<BiomeType, number> = {
@@ -54,6 +57,7 @@ const ROLL_RES: Record<BiomeType, number> = {
   snowfield: 3.0, shore: 2.8, rookery: 2.4,
   townhouses: 1.3, gardens: 2.1, fallow: 2.4,
   snowwood: 3.0,
+  railyard: 2.0,
 };
 const BIOME_WEIGHTS: Record<Landscape, Array<[BiomeType, number]>> = {
   forest: [
@@ -85,6 +89,7 @@ const BIOME_WEIGHTS: Record<Landscape, Array<[BiomeType, number]>> = {
     ['gardens', 0.36],
     ['fallow', 0.26],
   ],
+  subway: [['railyard', 1]],
   home: [['snowwood', 1]],
 };
 /**
@@ -180,6 +185,8 @@ export class Terrain {
   private readonly mixScratch: BiomeMix = { a: 'meadow', b: 'meadow', t: 1 };
   private readonly gorgeCache = new Map<number, Gorge[]>();
   private hutCache: Hut | null | undefined = undefined;
+  private readonly subwayCache = new Map<number, SubwaySection>();
+  private readonly subwayLevelCache = new Map<number, [number, number]>();
 
   constructor(seed: number) {
     this.seed = seed >>> 0;
@@ -192,6 +199,9 @@ export class Terrain {
 
   pathCenterX(p: number): number {
     const x = this.rawCenterX(p);
+    // The subway runs dead straight along x = 0.
+    const sw = subwayStraight(p);
+    if (sw > 0) return lerp(x, 0, sw);
     const hut = this.hut();
     if (hut && p > hut.p - HUT_FLAT) return lerp(x, hut.x, smoothstep(hut.p - HUT_FLAT, hut.p - 10, p));
     const g = this.gorgeNear(p, GORGE_FLAT);
@@ -284,6 +294,8 @@ export class Terrain {
   /** Height of the path centre line. */
   pathHeight(p: number): number {
     const h = this.rawPathHeight(p);
+    const sw = subwayStraight(p);
+    if (sw > 0) return lerp(h, this.subwayLevel(p), sw);
     const hut = this.hut();
     if (hut && p > hut.p - HUT_FLAT) return lerp(h, hut.h, smoothstep(hut.p - HUT_FLAT, hut.p - 10, p));
     const g = this.gorgeNear(p, GORGE_FLAT);
@@ -356,6 +368,43 @@ export class Terrain {
   pathEnd(p: number): number {
     const hut = this.hut();
     return hut ? smoothstep(hut.p - 2, hut.p + 0.5, p) : 0;
+  }
+
+  // ---------------------------------------------------------------------------
+  // The subway
+
+  /** Height of the tracks in the subway: an even gradient from one end of the section to the other. */
+  private subwayLevel(p: number): number {
+    const s = subwayStart(p) ?? 0;
+    let ends = this.subwayLevelCache.get(s);
+    if (!ends) {
+      ends = [this.rawPathHeight(s), this.rawPathHeight(s + LANDSCAPE_LENGTH)];
+      this.subwayLevelCache.set(s, ends);
+    }
+    return lerp(ends[0], ends[1], clamp((p - s) / LANDSCAPE_LENGTH, 0, 1));
+  }
+
+  /** The trains of the subway around progress p, if any. */
+  subwayAt(p: number): SubwaySection | null {
+    const s = subwayStart(p);
+    if (s === null) return null;
+    let sec = this.subwayCache.get(s);
+    if (!sec) {
+      sec = buildSubwaySection(this.seed, s);
+      this.subwayCache.set(s, sec);
+    }
+    return sec;
+  }
+
+  /** Height of the train roof or ramp at (x, z), or -Infinity where there is none. */
+  deckHeight(x: number, z: number): number {
+    const p = -z;
+    const sec = this.subwayAt(p);
+    const list = sec?.byChunk.get(Math.floor(p / CFG.chunk.length));
+    if (!list) return -Infinity;
+    let best = -1;
+    for (const t of list) best = Math.max(best, trainDeck(t, x, p));
+    return best < 0 ? -Infinity : this.pathHeight(p) + best;
   }
 
   // ---------------------------------------------------------------------------
@@ -573,6 +622,16 @@ export class Terrain {
       }
       h = lerp(h, ha, a);
     }
+    const sb = subwayStraight(-z);
+    if (sb > 0) {
+      // A flat bed of ballast out to the walls; beyond them the rim of the cutting lies higher.
+      const half = subwayWallHalf(-z);
+      // The ground only rises behind the inner face of the wall, so it never pokes through.
+      const bed = Math.min(half, SUBWAY.flare) + 0.5;
+      let hs = lerp(h, pathH, 1 - smoothstep(bed, bed + 4, ad));
+      if (half < Infinity) hs += subwayCut(-z) * smoothstep(half + 0.45, half + 0.6, ad);
+      h = lerp(h, hs, sb);
+    }
     const clearing = this.hutClearing(x, -z);
     if (clearing > 0) h = lerp(h, this.hut()!.h, clearing);
     if (gorge && !(deck && Math.abs(x - gorge.x) < GORGE.deckHalf && Math.abs(-z - gorge.p) < GORGE.deckHalfLen)) {
@@ -607,6 +666,9 @@ export class Terrain {
     }
     // Smooth asphalt in the town.
     if (ad < ROAD.half) r = lerp(r, ROAD.roll, landscapeWeight(p, 'town'));
+    // Packed ballast between the walls of the subway.
+    const sb = subwayStraight(p);
+    if (sb > 0 && ad < Math.min(subwayWallHalf(p), SUBWAY.flare)) r = lerp(r, 1.1, sb);
     return r;
   }
 
@@ -687,6 +749,12 @@ export class Terrain {
     gravel: new THREE.Color(0x7a746a),
     farTown: new THREE.Color(0x77704f),
     farTownDark: new THREE.Color(0x5a5045),
+    // The subway on an autumn day.
+    ballast: new THREE.Color(0x7a6a66),
+    ballastDark: new THREE.Color(0x5f5150),
+    autumnLeaves: new THREE.Color(0xd8692a),
+    autumnRed: new THREE.Color(0xb8452a),
+    autumnGrass: new THREE.Color(0x86973f),
   };
 
   private readonly tmpA = new THREE.Color();
@@ -813,6 +881,11 @@ export class Terrain {
         out.copy(P.snow).lerp(P.snowShade, smoothstep(-0.25, 0.45, n) * 0.75);
         return out.lerp(P.snowBlue, smoothstep(0.5, 0.85, valueNoise2(x * 0.1, z * 0.1, s + 95)) * 0.55);
       }
+      case 'railyard': {
+        // Grass under a thick layer of orange autumn leaves.
+        out.copy(P.autumnLeaves).lerp(P.autumnRed, smoothstep(-0.2, 0.5, n) * 0.6);
+        return out.lerp(P.autumnGrass, smoothstep(0.45, 0.8, valueNoise2(x * 0.12, z * 0.12, s + 97)) * 0.7);
+      }
       case 'fallow': {
         // Brown, dead grass with muddy patches.
         out.copy(P.deadGrass).lerp(P.deadGrassDark, smoothstep(-0.2, 0.5, n) * 0.8);
@@ -934,6 +1007,14 @@ export class Terrain {
     }
     const tw = landscapeWeight(p, 'town');
     const ad = Math.abs(d);
+    const sb = subwayStraight(p);
+    if (sb > 0) {
+      // Mauve ballast between the walls of the subway.
+      const half = Math.min(subwayWallHalf(p), SUBWAY.flare);
+      const n = valueNoise2(x * 0.9, z * 0.9, this.seed + 99);
+      this.roadTmp.copy(Terrain.PAL.ballast).lerp(Terrain.PAL.ballastDark, smoothstep(-0.4, 0.6, n) * 0.6);
+      out.lerp(this.roadTmp, sb * (1 - smoothstep(half - 0.2, half + 0.4, ad)));
+    }
     if (tw <= 0 || ad > ROAD.half + 0.15) return out;
     // The asphalt road of the town: worn grey with darker repair patches.
     const P = Terrain.PAL;

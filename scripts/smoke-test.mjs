@@ -283,7 +283,7 @@ try {
   check(m3.appleIndicator, `apple 75 m away in view is marked (indicator=${m3.appleIndicator})`);
 
   // The landscape changes every 1000 m and loops back to the forest.
-  for (const [at, expected, name] of [[1150, 'greece', '05c-greece.png'], [1620, 'greece', '05d-greece-later.png'], [2150, 'desert', '05e-desert.png'], [3150, 'antarctic', '05f-antarctic.png'], [4150, 'town', '05g-town.png'], [5150, 'forest', '05h-forest-again.png']]) {
+  for (const [at, expected, name] of [[1150, 'greece', '05c-greece.png'], [1620, 'greece', '05d-greece-later.png'], [2150, 'desert', '05e-desert.png'], [3150, 'antarctic', '05f-antarctic.png'], [4150, 'subway', '05g-subway.png'], [5150, 'town', '05g-town.png'], [6150, 'forest', '05h-forest-again.png']]) {
     await page.evaluate((p) => window.__appleKicker.teleport(p), at);
     await look(0, -0.12);
     await simulate(0.3);
@@ -292,7 +292,7 @@ try {
     check(sl.landscape === expected, `landscape at ${at} m is ${expected} (${sl.landscape})`);
   }
   const rg = await walkAndKick('right', 320, 0);
-  check(rg.after.appleMax > 5150, `apple still moves after the landscapes looped (${rg.after.appleMax.toFixed(1)} m)`);
+  check(rg.after.appleMax > 6150, `apple still moves after the landscapes looped (${rg.after.appleMax.toFixed(1)} m)`);
   await page.evaluate(() => window.__appleKicker.teleport(1300));
   const rg2 = await walkAndKick('right', 320, 0);
   check(rg2.after.appleMax > 1300, `apple moves through Greek obstacles (${rg2.after.appleMax.toFixed(1)} m)`);
@@ -358,12 +358,12 @@ try {
   check(ra.after.appleMax > 3300, `apple moves through Antarctic obstacles (${ra.after.appleMax.toFixed(1)} m)`);
   const visits = await page.evaluate(() => {
     const m = window.__appleKicker.game.iceMonster;
-    return [0, 1, 2, 3, 8, 4].map((k) => m.triggersIn(k).length);
+    return [0, 1, 2, 3, 9, 4].map((k) => m.triggersIn(k).length);
   });
   check(visits[3] >= 3 && visits[3] <= 4 && visits[4] >= 3 && visits[4] <= 4, `the ice monster turns up 3–4 times per Antarctic landscape (${visits[3]}, ${visits[4]})`);
   check(visits[0] + visits[1] + visits[2] + visits[5] === 0, `no ice monster elsewhere (${[...visits.slice(0, 3), visits[5]].join(', ')})`);
   // One in the next Antarctic landscape (the one at 3000 m may already be behind us).
-  const trigger = await page.evaluate(() => window.__appleKicker.game.iceMonster.triggersIn(8)[0]);
+  const trigger = await page.evaluate(() => window.__appleKicker.game.iceMonster.triggersIn(9)[0]);
   await page.evaluate((t) => {
     const k = window.__appleKicker;
     k.teleport(t - 30);
@@ -438,21 +438,141 @@ try {
   await simulate(0.05);
   await shot('05j-icicles.png');
 
+  // Subway: trains stand on three tracks; the way leads along a free track or up a ramp onto a roof.
+  const sub = await page.evaluate(() => window.__appleKicker.game.debugSubway(4500));
+  check(sub && sub.s === 4000 && sub.blocks.length >= 12, `the subway between Antarctica and the town has trains (${sub && sub.blocks.length} blocks, ${sub && sub.trains.length} trains)`);
+  check(sub.blocks.every((b) => b.lanes.some((l) => l !== 'train')), 'every block of trains leaves a free track or a ramp');
+  check(sub.blocks.every((b, k) => k === 0 || b.p0 - sub.blocks[k - 1].p1 >= 9), 'between two blocks every track is free for changing tracks');
+  const ramp = sub.trains.find((t) => t.ramp && t.p1 - t.p0 > 20);
+  check(Boolean(ramp), 'some trains have a ramp');
+  const noObstacles = await page.evaluate(() => {
+    const k = window.__appleKicker;
+    k.teleport(4500);
+    return [...k.game.world.obstacles.zombies.values(), ...k.game.world.obstacles.gnomes.values()].flat().filter((o) => -o.group.position.z > 4100 && -o.group.position.z < 4900).length;
+  });
+  check(noObstacles === 0, `no zombies or gnomes among the trains (${noObstacles})`);
+  // Walk up the ramp onto the roof, along it and drop off its end.
+  await page.evaluate((r) => {
+    const k = window.__appleKicker;
+    k.teleport(r.p0 - 10);
+    k.game.debugPlayer(r.x, -(r.p0 - 4));
+    k.game.debugApple(r.x + (r.x < 0 ? 4 : -4), -(r.p0 - 6));
+    k.game.storm.progress = r.p0 - 200;
+    k.look(0, -0.15);
+  }, ramp);
+  await simulate(0.1);
+  await shot('05k-subway-ramp.png');
+  let onRoof = null;
+  for (let i = 0; i < 40 && !onRoof; i++) {
+    await page.evaluate(() => window.__appleKicker.game.debugThirst(1));
+    await simulate(0.25, ['KeyW']);
+    const sr = await state();
+    if (-sr.playerZ > ramp.front + 3) onRoof = sr;
+  }
+  const roofY = await page.evaluate((p) => window.__appleKicker.game.world.terrain.pathHeight(p), -onRoof.playerZ);
+  check(onRoof && onRoof.playerY - roofY > 3, `walking up the ramp leads onto the roof (${(onRoof.playerY - roofY).toFixed(2)} m above the track)`);
+  await look(0, -0.1);
+  await shot('05l-subway-roof.png');
+  let down = null;
+  for (let i = 0; i < 60 && !down; i++) {
+    await page.evaluate(() => window.__appleKicker.game.debugThirst(1));
+    await simulate(0.25, ['KeyW']);
+    const sr = await state();
+    if (-sr.playerZ > ramp.p1 + 2) down = sr;
+  }
+  await simulate(1);
+  down = await state();
+  check(down && Math.abs(down.playerGroundGap) < 0.05, `at the end of the train the player drops back onto the track (${down && down.playerGroundGap.toFixed(2)} m)`);
+  // The sides of trains, of ramps and the walls stop the player.
+  const sideStop = await page.evaluate(([r, sub]) => {
+    const k = window.__appleKicker;
+    const g = k.game;
+    const dir = r.x < 0 ? 1 : -1;
+    const side = (p) => {
+      // Facing back towards the train (yaw π/2 walks towards −x).
+      g.player.reset(r.x + dir * 2, -p, dir > 0 ? Math.PI / 2 : -Math.PI / 2);
+      k.simulate(2, ['KeyW']);
+      return Math.abs(g.player.pos.x - r.x);
+    };
+    const train = side(r.front + 4);
+    const rampSide = side(r.p0 + 6);
+    // Sideways across all tracks in the open between two blocks of trains.
+    const gap = sub.blocks.find((b) => b.p0 > r.p1);
+    g.player.reset(0, -(gap.p0 - 4), -Math.PI / 2);
+    k.simulate(4, ['KeyW']);
+    return { train, rampSide, wall: Math.abs(g.player.pos.x) };
+  }, [ramp, sub]);
+  check(sideStop.train > 1.6 && sideStop.train < 1.8 && sideStop.rampSide > 1.6 && sideStop.rampSide < 1.8, `trains and ramps cannot be walked into from the side (${sideStop.train.toFixed(2)}, ${sideStop.rampSide.toFixed(2)} m from the track)`);
+  check(sideStop.wall > 4.9 && sideStop.wall < 5.4, `the walls keep the player in the cutting (${sideStop.wall.toFixed(2)} m)`);
+  // The apple bounces off the front of a train and rolls up a ramp when kicked hard.
+  const front = sub.trains.find((t) => !t.ramp);
+  const bounce = await page.evaluate((t) => {
+    const k = window.__appleKicker;
+    const g = k.game;
+    k.teleport(t.p0 - 8);
+    g.debugApple(t.x, -(t.p0 - 3));
+    g.player.reset(t.x, -(t.p0 - 4.3), 0);
+    g.storm.progress = t.p0 - 200;
+    k.look(0, -0.5);
+    k.simulate(0.3);
+    k.kick(0, -320, 'right');
+    let most = 0;
+    for (let i = 0; i < 25; i++) {
+      k.simulate(0.1);
+      most = Math.max(most, -g.apple.pos.z);
+    }
+    return most - t.p0;
+  }, front);
+  check(bounce < 0.5, `a kick into the front of a train bounces off it (${bounce.toFixed(2)} m)`);
+  const up = await page.evaluate((t) => {
+    const k = window.__appleKicker;
+    const g = k.game;
+    k.teleport(t.p0 - 8);
+    g.debugApple(t.x, -(t.p0 - 3));
+    g.player.reset(t.x, -(t.p0 - 4.3), 0);
+    g.storm.progress = t.p0 - 200;
+    k.look(0, -0.5);
+    k.simulate(0.3);
+    k.kick(0, -230, 'right');
+    let top = -Infinity;
+    for (let i = 0; i < 20; i++) {
+      k.simulate(0.1);
+      top = Math.max(top, g.apple.pos.y - g.world.terrain.pathHeight(-g.apple.pos.z));
+    }
+    return top;
+  }, ramp);
+  check(up > 3, `a hard kick sends the apple up the ramp onto the roof (${up.toFixed(2)} m high)`);
+  // Bottles instead of coins: in rows along free tracks and over the ramps.
+  const rows = await page.evaluate(() => {
+    const k = window.__appleKicker;
+    k.teleport(4300);
+    const g = k.game;
+    const t = g.world.terrain;
+    const list = g.debugBottles().filter((b) => -b.z > 4100 && -b.z < 4500);
+    const onLane = list.filter((b) => [-4, 0, 4].some((x) => Math.abs(b.x - x) < 0.01)).length;
+    const high = list.filter((b) => b.y - t.pathHeight(-b.z) > 3).length;
+    return { n: list.length, onLane, high };
+  });
+  check(rows.n >= 20 && rows.onLane === rows.n, `bottles stand in rows on the tracks (${rows.onLane}/${rows.n})`);
+  check(rows.high > 0, `some bottles lead over the roofs (${rows.high})`);
+  const respawnOnTrain = await page.evaluate((t) => window.__appleKicker.game.respawnClear(t.front + 2), sub.trains.find((t) => t.x === 0));
+  check(!respawnOnTrain, 'nobody respawns on a train');
+
   // Town: obstacles on the road, and zombies that follow the player, hit and can be kicked over.
-  await page.evaluate(() => window.__appleKicker.teleport(4300));
+  await page.evaluate(() => window.__appleKicker.teleport(5300));
   const rt = await walkAndKick('right', 320, 0);
-  check(rt.after.appleMax > 4300, `apple moves through the town (${rt.after.appleMax.toFixed(1)} m)`);
+  check(rt.after.appleMax > 5300, `apple moves through the town (${rt.after.appleMax.toFixed(1)} m)`);
   const zcount = await page.evaluate(() => {
     const k = window.__appleKicker;
     const seen = new Set();
-    for (let p = 4050; p < 4950; p += 150) {
+    for (let p = 5050; p < 5950; p += 150) {
       k.teleport(p);
-      for (const z of k.game.debugZombies()) if (-z.z > 4000 && -z.z < 5000) seen.add(z.id);
+      for (const z of k.game.debugZombies()) if (-z.z > 5000 && -z.z < 6000) seen.add(z.id);
     }
     let elsewhere = 0;
-    for (const p of [5300, 5600]) {
+    for (const p of [6300, 6600]) {
       k.teleport(p);
-      elsewhere += k.game.debugZombies().filter((z) => -z.z > 5100).length;
+      elsewhere += k.game.debugZombies().filter((z) => -z.z > 6100).length;
     }
     return { town: seen.size, elsewhere };
   });
@@ -462,8 +582,8 @@ try {
   const zsetup = async (gap) => page.evaluate((gap) => {
     const k = window.__appleKicker;
     const g = k.game;
-    k.teleport(4500);
-    const zs = [...g.world.obstacles.zombies.values()].flat().filter((z) => z.state !== 'down' && -z.group.position.z > 4520);
+    k.teleport(5500);
+    const zs = [...g.world.obstacles.zombies.values()].flat().filter((z) => z.state !== 'down' && -z.group.position.z > 5520);
     const zb = zs[0];
     // Only this one is about: the others lie knocked over.
     for (const o of [...g.world.obstacles.zombies.values()].flat()) if (o !== zb) o.state = 'down';
@@ -782,7 +902,7 @@ try {
     const k = Math.floor(g.p / 1000);
     perSection[k] = (perSection[k] ?? 0) + 1;
   }
-  check(gorges.length > 0 && Object.keys(perSection).every((k) => k % 5 === 1 && perSection[k] <= 2), `gorges only in Greece, at most two per section (${JSON.stringify(perSection)})`);
+  check(gorges.length > 0 && Object.keys(perSection).every((k) => k % 6 === 1 && perSection[k] <= 2), `gorges only in Greece, at most two per section (${JSON.stringify(perSection)})`);
   const gz = gorges[0];
   const onBridge = (g, x, p, yaw = 0) =>
     page.evaluate(([g, x, p, yaw]) => {
@@ -950,8 +1070,8 @@ try {
   const st0 = await state();
   check(st0.mode === 'story' && !st0.endlessUnlocked && st0.state === 'playing', `a story run starts with endless locked (${st0.mode})`);
   const hut = await page.evaluate(() => window.__appleKicker.game.world.terrain.hut());
-  check(hut && Math.abs(hut.p - 5060) < 1, `the story ends at a cabin at 5060 m (${hut && hut.p})`);
-  for (const [at, expected] of [[4500, 'town'], [5050, 'home'], [7000, 'home']]) {
+  check(hut && Math.abs(hut.p - 6060) < 1, `the story ends at a cabin at 6060 m (${hut && hut.p})`);
+  for (const [at, expected] of [[4500, 'subway'], [5500, 'town'], [6050, 'home'], [8000, 'home']]) {
     await page.evaluate((p) => window.__appleKicker.teleport(p), at);
     const sl = await state();
     check(sl.landscape === expected, `story: landscape at ${at} m is ${expected} (${sl.landscape})`);

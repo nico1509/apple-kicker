@@ -6,6 +6,7 @@ import { lerp, smoothstep } from '../utils/math';
 import { mulberry32, rand, subSeed, type Rng } from '../utils/noise';
 import { ColliderStore, SURFACES, type Surface } from './colliders';
 import { LANDSCAPE_LENGTH, landscapeAt } from './landscape';
+import { subwayStraight } from './subway';
 import { GORGE, Terrain, type Gorge } from './terrain';
 
 export type ObstacleKind =
@@ -185,6 +186,8 @@ export class Obstacles {
       if (Math.abs(this.terrain.pathSlope(p)) > 0.3) continue;
       // The last bit of the way home is free.
       if (landscapeAt(p) === 'home') continue;
+      // The trains are the obstacles of the subway.
+      if (subwayStraight(p) > 0) continue;
       if (this.terrain.gorgeNear(p, GORGE.deckHalfLen + 8)) continue;
       let kind = this.pickKind(p, rng);
       // A log at the foot of a descent traps the apple (it rolls back into the

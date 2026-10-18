@@ -28,7 +28,26 @@ export type Collider =
       maxX: number; maxY: number; maxZ: number;
       surface: Surface;
       blocksPlayer: true;
+    }
+  /**
+   * The ramp in front of a train: a wedge across x from minX to maxX that rises
+   * from y0 at progress pLow to y1 at pHigh. Its slope is ground (see
+   * World.groundHeight); as a collider it is only its sides.
+   */
+  | {
+      kind: 'ramp';
+      minX: number; maxX: number;
+      pLow: number; pHigh: number;
+      y0: number; y1: number;
+      surface: Surface;
+      blocksPlayer: true;
     };
+
+/** Height of the slope of a ramp at progress p. */
+export function rampTop(col: Extract<Collider, { kind: 'ramp' }>, p: number): number {
+  const t = (p - col.pLow) / (col.pHigh - col.pLow);
+  return col.y0 + (col.y1 - col.y0) * (t < 0 ? 0 : t > 1 ? 1 : t);
+}
 
 export interface MudZone {
   x: number;
@@ -110,34 +129,14 @@ export function sphereContact(
       out.surface = col.surface;
       return out;
     }
-    case 'box': {
-      const qx = Math.min(Math.max(cx, col.minX), col.maxX);
-      const qy = Math.min(Math.max(cy, col.minY), col.maxY);
-      const qz = Math.min(Math.max(cz, col.minZ), col.maxZ);
-      const dx = cx - qx;
-      const dy = cy - qy;
-      const dz = cz - qz;
-      const d2 = dx * dx + dy * dy + dz * dz;
-      if (d2 > 1e-10) {
-        if (d2 >= radius * radius) return null;
-        const dist = Math.sqrt(d2);
-        out.nx = dx / dist; out.ny = dy / dist; out.nz = dz / dist;
-        out.depth = radius - dist;
-      } else {
-        // Centre inside: push out through the nearest face.
-        const faces: Array<[number, number, number, number]> = [
-          [cx - col.minX, -1, 0, 0], [col.maxX - cx, 1, 0, 0],
-          [cy - col.minY, 0, -1, 0], [col.maxY - cy, 0, 1, 0],
-          [cz - col.minZ, 0, 0, -1], [col.maxZ - cz, 0, 0, 1],
-        ];
-        let best = faces[0];
-        for (const f of faces) if (f[0] < best[0]) best = f;
-        out.nx = best[1]; out.ny = best[2]; out.nz = best[3];
-        out.depth = best[0] + radius;
-      }
-      out.surface = col.surface;
-      return out;
+    case 'ramp': {
+      const top = rampTop(col, -cz);
+      // On the slope: that is ground, not a collision.
+      if (cy - radius > top - 0.03) return null;
+      return boxContact(col.minX, col.y0 - 1, -col.pHigh, col.maxX, top, -col.pLow, cx, cy, cz, radius, col.surface, out);
     }
+    case 'box':
+      return boxContact(col.minX, col.minY, col.minZ, col.maxX, col.maxY, col.maxZ, cx, cy, cz, radius, col.surface, out);
     case 'capsule': {
       const abx = col.bx - col.ax;
       const aby = col.by - col.ay;
@@ -165,6 +164,42 @@ export function sphereContact(
       return out;
     }
   }
+}
+
+/** Contact between a sphere and an axis-aligned box. */
+function boxContact(
+  minX: number, minY: number, minZ: number,
+  maxX: number, maxY: number, maxZ: number,
+  cx: number, cy: number, cz: number, radius: number,
+  surface: Surface,
+  out: Contact,
+): Contact | null {
+  const qx = Math.min(Math.max(cx, minX), maxX);
+  const qy = Math.min(Math.max(cy, minY), maxY);
+  const qz = Math.min(Math.max(cz, minZ), maxZ);
+  const dx = cx - qx;
+  const dy = cy - qy;
+  const dz = cz - qz;
+  const d2 = dx * dx + dy * dy + dz * dz;
+  if (d2 > 1e-10) {
+    if (d2 >= radius * radius) return null;
+    const dist = Math.sqrt(d2);
+    out.nx = dx / dist; out.ny = dy / dist; out.nz = dz / dist;
+    out.depth = radius - dist;
+  } else {
+    // Centre inside: push out through the nearest face.
+    const faces: Array<[number, number, number, number]> = [
+      [cx - minX, -1, 0, 0], [maxX - cx, 1, 0, 0],
+      [cy - minY, 0, -1, 0], [maxY - cy, 0, 1, 0],
+      [cz - minZ, 0, 0, -1], [maxZ - cz, 0, 0, 1],
+    ];
+    let best = faces[0];
+    for (const f of faces) if (f[0] < best[0]) best = f;
+    out.nx = best[1]; out.ny = best[2]; out.nz = best[3];
+    out.depth = best[0] + radius;
+  }
+  out.surface = surface;
+  return out;
 }
 
 /**

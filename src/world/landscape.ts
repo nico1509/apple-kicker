@@ -8,10 +8,10 @@ import { smoothstep } from '../utils/math';
  * comes back. In the story mode every one comes once, then the snowy home
  * stretch with the hut at the end of the path.
  */
-export type Landscape = 'forest' | 'greece' | 'desert' | 'antarctic' | 'town' | 'home';
+export type Landscape = 'forest' | 'greece' | 'desert' | 'antarctic' | 'subway' | 'town' | 'home';
 
 export const LANDSCAPE_LENGTH = 1000;
-export const LANDSCAPES: readonly Landscape[] = ['forest', 'greece', 'desert', 'antarctic', 'town'];
+export const LANDSCAPES: readonly Landscape[] = ['forest', 'greece', 'desert', 'antarctic', 'subway', 'town'];
 /** Start of the home stretch in the story mode. */
 export const HOME_START = LANDSCAPES.length * LANDSCAPE_LENGTH;
 /** Story mode: the path ends this far into the home stretch, at the door of the hut. */
@@ -140,6 +140,19 @@ export const ATMOSPHERES: Record<Landscape, Atmosphere> = {
     fogFar: 420,
     cirrus: 0.35,
     clouds: 0.3,
+  },
+  // The railway cutting on a bright autumn afternoon, as in the arcade game.
+  subway: {
+    horizon: new THREE.Color(0xcfe4f4),
+    top: new THREE.Color(0x3f8fe0),
+    hemiSky: new THREE.Color(0xd8e6ff),
+    hemiGround: new THREE.Color(0x8a6a5a),
+    sun: new THREE.Color(0xfff0dc),
+    sunIntensity: 3.0,
+    fogNear: 90,
+    fogFar: 300,
+    cirrus: 0.4,
+    clouds: 0.5,
   },
   // A small town in winter without snow: an overcast grey sky and flat, cold light.
   town: {
