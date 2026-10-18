@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { AudioEngine } from './audio/audio';
 import { CFG, type Foot } from './config';
+import { T } from './i18n';
 import { Apple } from './entities/apple';
 import { CamelSpit, SPIT_PUSH, type Camel } from './entities/camel';
 import { GnomeBand, type Gnome } from './entities/gnome';
@@ -190,14 +191,14 @@ export class Game {
     this.playerEvents = {
       onKick: (power, chip) => {
         this.audio.kick(power);
-        if (power > 0.85) this.hint(chip ? 'Hoher Lupfer!' : 'Volle Kraft!', 1200, 'good');
+        if (power > 0.85) this.hint(chip ? T.highChip : T.fullPower, 1200, 'good');
       },
       onWhiff: () => {
         this.audio.whiff();
-        this.hint('Verfehlt! Der Apfel muss dicht vor dem Fuß liegen.', 2600, 'bad');
+        this.hint(T.whiff, 2600, 'bad');
       },
       onFootstep: (sprinting) => this.audio.footstep(sprinting),
-      onExhausted: () => this.hint('Aus der Puste! Kurz verschnaufen …', 1300, 'bad'),
+      onExhausted: () => this.hint(T.exhausted, 1300, 'bad'),
     };
 
     this.endlessUnlocked = this.loadUnlocked();
@@ -408,7 +409,7 @@ export class Game {
     this.requestPointerLock();
     this.input.cancelDrag();
     this.input.enabled = true;
-    this.hud.message(this.touch.enabled ? 'Lauf zum Apfel. Wischen = Kick!' : 'Lauf zum Apfel. Maustaste halten, ziehen, loslassen = Kick!', 3800);
+    this.hud.message(this.touch.enabled ? T.startTouch : T.startMouse, 3800);
   }
 
   restart(): void {
@@ -487,7 +488,7 @@ export class Game {
     this.requestPointerLock();
     this.input.cancelDrag();
     this.input.enabled = true;
-    this.hud.message(`Weiter geht's bei ${Math.floor(reached)} m!`, 2400, 'good');
+    this.hud.message(T.continueAt(reached), 2400, 'good');
   }
 
   /**
@@ -503,7 +504,7 @@ export class Game {
     this.state = 'menu';
     this.placeRunAt(record);
     this.start();
-    this.hud.message(`Kickstart bei ${Math.floor(record)} m!`, 2400, 'good');
+    this.hud.message(T.kickstartGo(record), 2400, 'good');
   }
 
   /**
@@ -675,7 +676,7 @@ export class Game {
     if (e.repeat) return;
     if (e.code === 'KeyM') {
       this.audio.setMuted(!this.audio.muted);
-      this.hud.message(this.audio.muted ? 'Ton aus' : 'Ton an', 900);
+      this.hud.message(this.audio.muted ? T.soundOff : T.soundOn, 900);
       return;
     }
     if (this.state === 'paused') {
@@ -747,7 +748,7 @@ export class Game {
       // A hit pushes the player along the flight direction of the spit.
       this.player.shove(dx * SPIT_PUSH, dz * SPIT_PUSH);
       this.audio.hit(0.5);
-      this.hint('Angespuckt!', 1100, 'bad');
+      this.hint(T.spat, 1100, 'bad');
     });
     if (playing) {
       this.world.update(this.player.pos.z);
@@ -756,30 +757,30 @@ export class Game {
     this.gnomeBand.update(dt, this.gnomes(), this.apple, this.player, playing, {
       onGrab: () => {
         this.audio.hit(0.6);
-        this.hint('Ein Wichtel hat deinen Apfel geklaut! Kick ihn um!', 2400, 'bad');
+        this.hint(T.gnomeGrab, 2400, 'bad');
       },
     });
     this.zombieHorde.update(dt, this.zombies(), this.apple, this.player, playing, {
       onChase: () => {
-        this.hint('Ein Zombie! Kick ihn um, bevor er zuschlägt!', 2600, 'bad');
+        this.hint(T.zombieChase, 2600, 'bad');
       },
       onWindup: () => this.audio.groan(),
       onHit: () => {
         this.player.loseBreath();
         this.audio.hit(1.2);
-        this.hint('Ein Zombie hat dich erwischt! Keine Puste mehr …', 1800, 'bad');
+        this.hint(T.zombieHit, 1800, 'bad');
       },
     });
     this.iceMonster.update(dt, this.player, this.apple, playing, {
       onAppear: () => {
         this.audio.roar();
-        this.hint('Ein Eismonster! Vorsicht vor den Eiszapfen!', 2600, 'bad');
+        this.hint(T.iceMonster, 2600, 'bad');
       },
       onIcicle: () => this.audio.iceCrack(),
       onBump: (dx, dz) => {
         this.player.shove(dx, dz);
         this.audio.hit(1);
-        this.hint('Umgerannt!', 1000, 'bad');
+        this.hint(T.knockedOver, 1000, 'bad');
       },
       onKnockApple: (vx, vz) => this.apple.nudge(vx, vz),
     });
@@ -802,11 +803,11 @@ export class Game {
       this.updateLandscapeLife();
       if (!this.tipObstacles && this.apple.maxProgress > 34) {
         this.tipObstacles = true;
-        this.hud.message(`Hindernisse voraus! Fester kicken – oder mit ${this.touch.enabled ? 'dem roten Knopf' : 'Leertaste'} lupfen.`, 3200);
+        this.hud.message(T.obstaclesAhead(this.touch.enabled), 3200);
       }
       if (!this.tipStorm && dist < 40) {
         this.tipStorm = true;
-        this.hud.message(this.appleTrails() ? 'Das Gewitter holt deinen Apfel ein – kick ihn weiter!' : 'Das Gewitter holt auf – lauf!', 2500, 'bad');
+        this.hud.message(this.appleTrails() ? T.stormOnApple : T.stormOnPlayer, 2500, 'bad');
       }
     }
   }
@@ -820,7 +821,7 @@ export class Game {
     this.lives++;
     this.hud.setLives(this.lives, this.maxLives());
     this.audio.chime();
-    this.hud.message('Ein Leben zurück!', 2400, 'good');
+    this.hud.message(T.lifeBack, 2400, 'good');
   }
 
   /** The thirst bar drains fast; a bottle on the path fills it (and the stamina) up again. Empty costs a life. */
@@ -835,12 +836,12 @@ export class Game {
       if (cans > 0) {
         // The energy drinks of the subway: twice as fast sprinting for a while (restarts, never adds up).
         this.player.boost(CFG.energy.seconds);
-        this.hint('Energydrink! Doppelt so schnell sprinten!', 1400, 'good');
-      } else this.hint('Apfelschorle! Ahh …', 1100, 'good');
+        this.hint(T.energyDrink, 1400, 'good');
+      } else this.hint(T.spritzer, 1100, 'good');
     }
     this.thirst = Math.max(0, this.thirst - dt / CFG.thirst.drainSeconds);
     if (this.thirst < CFG.thirst.warnBelow && this.thirst > 0) {
-      this.hint('Durst! Schnapp dir eine Apfelschorle auf dem Weg.', 2400, 'bad');
+      this.hint(T.thirsty, 2400, 'bad');
     }
     this.hud.setThirst(this.thirst, CFG.thirst.warnBelow);
     if (this.thirst <= 0) this.caught('thirst');
@@ -869,13 +870,13 @@ export class Game {
     if (g) {
       this.audio.kick(0.6);
       this.audio.hit(1.4);
-      this.hint(carried ? 'Umgekickt! Der Wichtel lässt den Apfel fallen.' : 'Wichtel umgekickt!', 1600, 'good');
+      this.hint(carried ? T.gnomeDropped : T.gnomeDown, 1600, 'good');
       return true;
     }
     if (!this.zombieHorde.kick(this.zombies(), this.player)) return false;
     this.audio.kick(0.7);
     this.audio.hit(1.6);
-    this.hint('Zombie umgekickt!', 1400, 'good');
+    this.hint(T.zombieDown, 1400, 'good');
     return true;
   }
 

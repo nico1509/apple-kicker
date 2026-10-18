@@ -1,3 +1,5 @@
+import { T } from '../i18n';
+
 export type OverlayKind = 'start' | 'paused' | 'lifelost' | 'gameover' | 'won' | null;
 export type Difficulty = 'easy' | 'hard';
 /** Story: every landscape once, then the way ends. Endless: the landscapes loop (unlocked by finishing the story). */
@@ -73,19 +75,19 @@ export class Hud {
       <div class="vignette"></div>
       <div class="hud-top">
         <div class="hud-left">
-          <div class="panel distance"><span class="label">Apfel</span><span class="value" data-distance>0 m</span><span class="best" data-best></span></div>
+          <div class="panel distance"><span class="label">${T.apple}</span><span class="value" data-distance>0 m</span><span class="best" data-best></span></div>
           <div class="panel meter thirst" data-thirst-wrap>
             ${BOTTLE_ICON}
-            <div class="meter-body"><span class="label">Durst</span><div class="bar"><div class="fill" data-thirst></div></div></div>
+            <div class="meter-body"><span class="label">${T.thirst}</span><div class="bar"><div class="fill" data-thirst></div></div></div>
           </div>
           <div class="panel meter stamina" data-stamina-wrap>
             ${STAMINA_ICON}
-            <div class="meter-body"><span class="label">Ausdauer</span><div class="bar"><div class="fill" data-stamina></div></div></div>
+            <div class="meter-body"><span class="label">${T.stamina}</span><div class="bar"><div class="fill" data-stamina></div></div></div>
           </div>
         </div>
         <div class="lives" data-lives hidden></div>
         <div class="panel storm" data-storm-wrap>
-          <span class="label">Gewitter</span>
+          <span class="label">${T.storm}</span>
           <span class="value" data-storm>– m</span>
           <div class="bar"><div class="fill" data-storm-bar></div></div>
         </div>
@@ -199,7 +201,7 @@ export class Hud {
     this.lastLives = key;
     this.livesEl.hidden = total === 0;
     this.livesEl.innerHTML = Hud.livesHtml(left, total);
-    this.livesEl.setAttribute('aria-label', `${left} von ${total} Leben`);
+    this.livesEl.setAttribute('aria-label', T.livesOf(left, total));
   }
 
   private static livesHtml(left: number, total: number): string {
@@ -214,7 +216,7 @@ export class Hud {
       this.lastDistance = txt;
       this.distanceEl.textContent = txt;
     }
-    const bestTxt = best > 0 ? `Rekord ${Math.floor(best)} m` : '';
+    const bestTxt = best > 0 ? T.record(best) : '';
     if (bestTxt !== this.lastBest) {
       this.lastBest = bestTxt;
       this.bestEl.textContent = bestTxt;
@@ -223,7 +225,7 @@ export class Hud {
 
   setStorm(dist: number, danger: number, apple: boolean): void {
     const d = Math.max(0, dist);
-    const txt = window.innerWidth < 480 ? `${Math.round(d)} m` : `${Math.round(d)} m hinter ${apple ? 'dem Apfel' : 'dir'}`;
+    const txt = window.innerWidth < 480 ? `${Math.round(d)} m` : T.stormBehind(d, apple);
     if (txt !== this.lastStorm) {
       this.lastStorm = txt;
       this.stormEl.textContent = txt;
@@ -262,7 +264,7 @@ export class Hud {
     this.arrowLine.style.transform = `rotate(${angle}rad)`;
     const hue = 110 - power * 110;
     this.arrowLine.style.background = `linear-gradient(90deg, rgba(255,255,255,0.35), hsl(${hue} 90% 55%))`;
-    this.arrowLabel.textContent = tap ? 'Stupser' : `${Math.round(power * 100)} %${chip ? ' · Lupfer' : ''}`;
+    this.arrowLabel.textContent = tap ? T.tap : `${Math.round(power * 100)} %${chip ? ` · ${T.chip}` : ''}`;
   }
 
   clearDrag(): void {
@@ -294,7 +296,7 @@ export class Hud {
     this.indicator.style.left = `${x}px`;
     this.indicator.style.top = `${y}px`;
     this.chevron.style.transform = `rotate(${angle}rad)`;
-    this.indicatorLabel.textContent = `Apfel ${Math.round(distance)} m`;
+    this.indicatorLabel.textContent = T.appleDistance(distance);
   }
 
   private selectDifficulty(d: Difficulty): void {
@@ -310,24 +312,24 @@ export class Hud {
   /** "Kickstart" button: start an easy run right at the record distance. */
   private static kickstartHtml(record: number, hidden = false): string {
     if (record < 1) return '';
-    return `<button class="start secondary" data-action="kickstart"${hidden ? ' hidden' : ''}>Kickstart bei ${Math.floor(record)} m</button>`;
+    return `<button class="start secondary" data-action="kickstart"${hidden ? ' hidden' : ''}>${T.kickstartAt(record)}</button>`;
   }
 
   private static recordHtml(best: number): string {
-    return `<span class="choice-record">${best > 0 ? `Rekord <b>${Math.floor(best)} m</b>` : 'Noch kein Rekord'}</span>`;
+    return `<span class="choice-record">${best > 0 ? T.recordHtml(best) : T.noRecord}</span>`;
   }
 
   private static modeHtml(mode: Mode, endlessUnlocked: boolean): string {
     const on = (m: Mode): string => (m === mode ? ' selected' : '');
     return `
-      <div class="difficulty mode" role="radiogroup" aria-label="Modus">
+      <div class="difficulty mode" role="radiogroup" aria-label="${T.mode}">
         <button class="choice${on('story')}" role="radio" aria-checked="${mode === 'story'}" data-mode="story">
-          <span class="choice-head"><span class="choice-title">Story</span></span>
-          <span class="choice-text">Ein Weg mit Ziel. Kommst du mit deinem Apfel an?</span>
+          <span class="choice-head"><span class="choice-title">${T.story}</span></span>
+          <span class="choice-text">${T.storyText}</span>
         </button>
         <button class="choice${on('endless')}${endlessUnlocked ? '' : ' locked'}" role="radio" aria-checked="${mode === 'endless'}"${endlessUnlocked ? '' : ' aria-disabled="true"'} data-mode="endless">
-          <span class="choice-head"><span class="choice-title">${endlessUnlocked ? '' : '🔒 '}Endlos</span></span>
-          <span class="choice-text">${endlessUnlocked ? 'Der Weg hört nie auf. Wie weit kommst du?' : 'Wird freigeschaltet, wenn du den Story-Modus geschafft hast.'}</span>
+          <span class="choice-head"><span class="choice-title">${endlessUnlocked ? '' : '🔒 '}${T.endless}</span></span>
+          <span class="choice-text">${endlessUnlocked ? T.endlessText : T.endlessLocked}</span>
         </button>
       </div>`;
   }
@@ -342,40 +344,37 @@ export class Hud {
         <img class="logo-apple" src="./favicon.svg" alt="" />
         <span class="logo-words" aria-hidden="true"><span class="logo-apple-word">APPLE</span><span class="logo-kicker-word">KICKER</span></span>
       </h1>
-      <p class="tagline">Goldener Oktober, ein Apfel, ein Feldweg – und ein Gewitter im Nacken.</p>
+      <p class="tagline">${T.tagline}</p>
       <div class="rules">
-        <p>${mode === 'story' ? 'Kicke deinen Apfel den Weg entlang, bis ans Ende.' : 'Kicke deinen Apfel so weit wie möglich den Weg entlang.'} Gezählt werden die Meter, die der <b>Apfel</b> zurücklegt.</p>
-        <p>Von hinten zieht eine Schlechtwetterfront heran. Holt sie dich oder deinen Apfel ein, kostet das ein Leben.</p>
-        <p>Kicken macht schnell durstig: Sammle die Apfelschorle-Flaschen auf dem Weg ein, sie füllen auch deine Ausdauer auf. Ist die Durst-Anzeige leer, kostet das ebenfalls ein Leben.</p>
-        <p>Wurzeln, Äste, Steine, Pfützen und Hügel werden mit der Zeit mehr – kick fester oder lupf drüber.</p>
+        <p>${T.rulesGoal(mode === 'story')}</p>
+        <p>${T.rulesStorm}</p>
+        <p>${T.rulesThirst}</p>
+        <p>${T.rulesObstacles}</p>
       </div>
       ${Hud.modeHtml(mode, endlessUnlocked)}
-      <div class="difficulty" role="radiogroup" aria-label="Schwierigkeit">
+      <div class="difficulty" role="radiogroup" aria-label="${T.difficulty}">
         <button class="choice" role="radio" data-difficulty="easy">
-          <span class="choice-head"><span class="choice-title">Einfach</span><span class="choice-lives">${Hud.livesHtml(EASY_LIVES, EASY_LIVES)}</span></span>
-          <span class="choice-text">3 Leben, danach geht es an der erreichten Stelle weiter</span>
+          <span class="choice-head"><span class="choice-title">${T.easy}</span><span class="choice-lives">${Hud.livesHtml(EASY_LIVES, EASY_LIVES)}</span></span>
+          <span class="choice-text">${T.easyText}</span>
           ${Hud.recordHtml(bests.easy)}
         </button>
         <button class="choice" role="radio" data-difficulty="hard">
-          <span class="choice-head"><span class="choice-title">Schwer</span><span class="choice-lives">${Hud.livesHtml(1, 1)}</span></span>
-          <span class="choice-text">Ein Leben, eingeholt ist vorbei</span>
+          <span class="choice-head"><span class="choice-title">${T.hard}</span><span class="choice-lives">${Hud.livesHtml(1, 1)}</span></span>
+          <span class="choice-text">${T.hardText}</span>
           ${Hud.recordHtml(bests.hard)}
         </button>
       </div>
       <div class="buttons">
-        <button class="start" data-action="start"><span class="only-mouse">Klicken</span><span class="only-touch">Tippen</span> zum Starten</button>
+        <button class="start" data-action="start">${T.startHtml}</button>
         ${Hud.kickstartHtml(bests.easy)}
       </div>
       <div class="hint only-touch">
-        <span><b>Stick</b> hoch/runter = laufen, links/rechts = drehen, über den Rand = sprinten</span>
-        <span><b>Wischen</b> = Kick</span><span><b>Roter Knopf</b> halten = Lupfer</span>
+        ${T.touchHelpHtml}
       </div>
       <div class="hint only-mouse">
-        <span><b>WASD</b> laufen</span><span><b>Shift</b> sprinten</span>
-        <span><b>Maustaste</b> halten, ziehen, loslassen = Kick</span>
-        <span><b>Leertaste</b> halten = Lupfer</span>
+        ${T.mouseHelpHtml}
       </div>
-      <p class="small only-mouse">Der Mauszeiger wird im Spiel eingefangen · <kbd>Esc</kbd> oder <kbd>P</kbd> pausiert · <kbd>M</kbd> Ton an/aus</p>
+      <p class="small only-mouse">${T.mouseNoteHtml}</p>
     `;
     this.selectDifficulty(difficulty);
   }
@@ -385,21 +384,21 @@ export class Hud {
     this.overlay.hidden = false;
     this.overlay.scrollTop = 0;
     this.overlayContent.innerHTML = `
-      <h2>Pause</h2>
-      <p>Der Apfel wartet. Das Gewitter auch.</p>
+      <h2>${T.pause}</h2>
+      <p>${T.pauseText}</p>
       <div class="buttons">
-        <button class="start" data-action="start">Weiter</button>
-        <button class="start secondary" data-action="restart">Neustart</button>
-        <button class="start secondary" data-action="menu">Hauptmenü</button>
+        <button class="start" data-action="start">${T.resume}</button>
+        <button class="start secondary" data-action="restart">${T.restart}</button>
+        <button class="start secondary" data-action="menu">${T.mainMenu}</button>
       </div>
-      <p class="small only-mouse"><kbd>Enter</kbd> / <kbd>P</kbd> = weiter · <kbd>R</kbd> = Neustart</p>
+      <p class="small only-mouse">${T.pauseKeysHtml}</p>
     `;
   }
 
   private static causeText(cause: Cause): string {
-    if (cause === 'thirst') return 'Du bist verdurstet. Unterwegs liegt Apfelschorle!';
-    if (cause === 'gorge') return 'Dein Apfel ist in die Schlucht gefallen.';
-    return cause === 'apple' ? 'Das Gewitter hat deinen Apfel eingeholt.' : 'Das Gewitter hat dich eingeholt.';
+    if (cause === 'thirst') return T.causeThirst;
+    if (cause === 'gorge') return T.causeGorge;
+    return cause === 'apple' ? T.causeApple : T.causePlayer;
   }
 
   /** Easy mode: the storm (or the thirst) took a life but at least one is left. */
@@ -408,13 +407,13 @@ export class Hud {
     this.overlay.hidden = false;
     this.overlay.scrollTop = 0;
     this.overlayContent.innerHTML = `
-      <h2>Ein Leben verloren!</h2>
+      <h2>${T.lifeLost}</h2>
       <p>${Hud.causeText(cause)}</p>
-      <div class="lives big" aria-label="${left} von ${total} Leben">${Hud.livesHtml(left, total)}</div>
-      <p>${left === 1 ? 'Noch <b>1 Leben</b>' : `Noch <b>${left} Leben</b>`} · dein Apfel ist bei <b>${Math.floor(score)} m</b>.</p>
-      <button class="start" data-action="continue">Weitermachen</button>
-      <button class="start secondary" data-action="restart">Neu starten</button>
-      <p class="small only-mouse"><kbd>Enter</kbd> = weitermachen bei ${Math.floor(score)} m · <kbd>R</kbd> = neu starten mit allen Leben</p>
+      <div class="lives big" aria-label="${T.livesOf(left, total)}">${Hud.livesHtml(left, total)}</div>
+      <p>${T.livesLeftHtml(left, score)}</p>
+      <button class="start" data-action="continue">${T.continue}</button>
+      <button class="start secondary" data-action="restart">${T.restartAll}</button>
+      <p class="small only-mouse">${T.lifeLostKeysHtml(score)}</p>
     `;
   }
 
@@ -425,16 +424,16 @@ export class Hud {
     this.overlay.scrollTop = 0;
     this.armedAt = performance.now() + 700;
     this.overlayContent.innerHTML = `
-      <h2>${cause === 'thirst' ? 'Verdurstet!' : cause === 'gorge' ? 'Der Apfel ist in die Schlucht gefallen!' : cause === 'apple' ? 'Das Gewitter hat deinen Apfel eingeholt!' : 'Vom Gewitter eingeholt!'}</h2>
-      ${livesTotal > 0 ? `<div class="lives big" aria-label="Keine Leben mehr">${Hud.livesHtml(0, livesTotal)}</div><p>Alle Leben sind verbraucht.</p>` : ''}
-      <p class="score">Dein Apfel kam <b>${Math.floor(score)} m</b> weit.</p>
-      ${isRecord ? '<p class="record">Neuer Rekord!</p>' : `<p>Rekord: <b>${Math.floor(best)} m</b></p>`}
+      <h2>${cause === 'thirst' ? T.overThirst : cause === 'gorge' ? T.overGorge : cause === 'apple' ? T.overApple : T.overPlayer}</h2>
+      ${livesTotal > 0 ? `<div class="lives big" aria-label="${T.noLivesLeft}">${Hud.livesHtml(0, livesTotal)}</div><p>${T.allLivesUsed}</p>` : ''}
+      <p class="score">${T.scoreHtml(score)}</p>
+      ${isRecord ? `<p class="record">${T.newRecord}</p>` : `<p>${T.recordLineHtml(best)}</p>`}
       <div class="buttons">
-        <button class="start" data-action="start">Nochmal versuchen</button>
+        <button class="start" data-action="start">${T.tryAgain}</button>
         ${livesTotal > 0 ? Hud.kickstartHtml(best) : ''}
-        <button class="start secondary" data-action="menu">Menü</button>
+        <button class="start secondary" data-action="menu">${T.menu}</button>
       </div>
-      <p class="small only-mouse">oder <kbd>Enter</kbd> drücken</p>
+      <p class="small only-mouse">${T.orPressEnterHtml}</p>
     `;
   }
 
@@ -447,16 +446,16 @@ export class Hud {
     const min = Math.floor(seconds / 60);
     const sec = Math.floor(seconds % 60);
     this.overlayContent.innerHTML = `
-      <h2>Sicher zuhause angekommen!</h2>
-      <p>Du hast deinen Apfel den ganzen Weg nach Hause gebracht. Drinnen ist es warm.</p>
-      <p class="score">Dein Apfel kam <b>${Math.floor(score)} m</b> weit, in <b>${min}:${String(sec).padStart(2, '0')} min</b>.</p>
-      ${isRecord ? '<p class="record">Neuer Rekord!</p>' : best > 0 ? `<p>Rekord: <b>${Math.floor(best)} m</b></p>` : ''}
-      ${unlockedNow ? '<p class="record">Der Endlos-Modus ist jetzt freigeschaltet!</p>' : ''}
+      <h2>${T.wonTitle}</h2>
+      <p>${T.wonText}</p>
+      <p class="score">${T.wonScoreHtml(score, `${min}:${String(sec).padStart(2, '0')}`)}</p>
+      ${isRecord ? `<p class="record">${T.newRecord}</p>` : best > 0 ? `<p>${T.recordLineHtml(best)}</p>` : ''}
+      ${unlockedNow ? `<p class="record">${T.endlessUnlocked}</p>` : ''}
       <div class="buttons">
-        <button class="start" data-action="start">Nochmal spielen</button>
-        <button class="start secondary" data-action="menu">Hauptmenü</button>
+        <button class="start" data-action="start">${T.playAgain}</button>
+        <button class="start secondary" data-action="menu">${T.mainMenu}</button>
       </div>
-      <p class="small only-mouse">oder <kbd>Enter</kbd> drücken</p>
+      <p class="small only-mouse">${T.orPressEnterHtml}</p>
     `;
   }
 
