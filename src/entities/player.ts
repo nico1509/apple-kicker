@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { CFG, type Foot } from '../config';
 import { clamp, damp, DEG, lerp } from '../utils/math';
 import { rampTop, sphereContact, type Contact } from '../world/colliders';
+import { subwayWallHalf } from '../world/subway';
 import { World } from '../world/world';
 import { Apple } from './apple';
 import { Input, type KickRequest } from './input';
@@ -29,6 +30,9 @@ interface KickState {
 const TOUCH_TURN_RATE = 2.4;
 /** Touch movement stick: deflection below this is ignored. */
 const TOUCH_DEAD_ZONE = 0.12;
+
+/** Longest step in metres between two collision checks. */
+const MAX_STEP = 0.15;
 
 /** Seconds into the swing at which the foot meets the apple. */
 const KICK_CONTACT_TIME = 0.21;
@@ -203,6 +207,8 @@ export class Player {
     const moving = mx !== 0 || mz !== 0;
     const wantSprint = !paused && moving && (input.isDown('ShiftLeft') || input.isDown('ShiftRight') || input.sprintStick) && this.stamina > 0;
     this.sprinting = wantSprint;
+    let moveX = 0;
+    let moveZ = 0;
     if (paused) {
       // Freeze: no sliding, no stamina regeneration while the world stands still.
       this.vel.set(0, 0, 0);
@@ -238,82 +244,30 @@ export class Player {
       const accel = moving ? CFG.player.accel : CFG.player.accel * 1.4;
       this.vel.x = damp(this.vel.x, targetVx, accel / 4, dt);
       this.vel.z = damp(this.vel.z, targetVz, accel / 4, dt);
-      this.pos.x += this.vel.x * dt;
-      this.pos.z += this.vel.z * dt;
+      moveX = this.vel.x * dt;
+      moveZ = this.vel.z * dt;
       if (this.shoveX !== 0 || this.shoveZ !== 0) {
         const f = 1 - Math.exp(-8 * dt);
-        this.pos.x += this.shoveX * f;
-        this.pos.z += this.shoveZ * f;
+        moveX += this.shoveX * f;
+        moveZ += this.shoveZ * f;
         this.shoveX *= 1 - f;
         this.shoveZ *= 1 - f;
         if (Math.abs(this.shoveX) + Math.abs(this.shoveZ) < 1e-3) this.shoveX = this.shoveZ = 0;
       }
-      // Never walk backwards past the start line.
-      if (this.pos.z > CFG.path.startLineZ) this.pos.z = CFG.path.startLineZ;
     }
 
-    // ----- collisions with the world
-    this.inBush = 0;
-    this.world.colliders.forEachNear(this.pos.z, (col) => {
-      const pr = CFG.player.radius;
-      if (col.kind === 'sphere') {
-        if (col.surface.soft) {
-          // Bushes slow the player down but can be pushed through.
-          const dx = this.pos.x - col.x;
-          const dz = this.pos.z - col.z;
-          const dd = dx * dx + dz * dz;
-          const rr = (col.r + pr * 0.5) ** 2;
-          if (dd < rr && Math.abs(this.pos.y + 0.6 - col.y) < col.r + 0.6) this.inBush = 1;
-          return;
-        }
-        if (!col.blocksPlayer) return;
-        if (col.y - col.r > this.pos.y + 1.6 || col.y + col.r < this.pos.y + 0.05) return;
-        this.pushOutCircle(col.x, col.z, col.r + pr);
-      } else if (col.kind === 'cylinder') {
-        if (!col.blocksPlayer) return;
-        if (col.yTop < this.pos.y + 0.3) return;
-        this.pushOutCircle(col.x, col.z, col.r + pr);
-      } else if (col.kind === 'capsule') {
-        if (!col.blocksPlayer) return;
-        const top = Math.max(col.ay, col.by) + col.r;
-        const bottom = Math.min(col.ay, col.by) - col.r;
-        if (top < this.pos.y + 0.25 || bottom > this.pos.y + 1.7) return;
-        // Closest point on the segment in the XZ plane.
-        const abx = col.bx - col.ax;
-        const abz = col.bz - col.az;
-        const len2 = abx * abx + abz * abz;
-        let t = len2 > 0 ? ((this.pos.x - col.ax) * abx + (this.pos.z - col.az) * abz) / len2 : 0;
-        t = clamp(t, 0, 1);
-        this.pushOutCircle(col.ax + abx * t, col.az + abz * t, col.r + pr);
-      } else if (col.kind === 'box') {
-        if (col.maxY < this.pos.y + 0.25 || col.minY > this.pos.y + 1.7) return;
-        this.pushOutBox(col.minX, col.minZ, col.maxX, col.maxZ, pr);
-      } else if (col.kind === 'ramp') {
-        // The side of a ramp; walking up its slope is terrain following.
-        if (rampTop(col, -this.pos.z) < this.pos.y + 0.25) return;
-        this.pushOutBox(col.minX, -col.pHigh, col.maxX, -col.pLow, pr);
-      } else if (col.kind === 'wall') {
-        const abx = col.bx - col.ax;
-        const abz = col.bz - col.az;
-        const len2 = abx * abx + abz * abz;
-        const t = clamp(len2 > 0 ? ((this.pos.x - col.ax) * abx + (this.pos.z - col.az) * abz) / len2 : 0, 0, 1);
-        this.pushOutCircle(col.ax + abx * t, col.az + abz * t, pr);
-      }
-    });
-
-    // ----- terrain following
-    // Train roofs and ramps carry the player from above; off the end of a roof they fall.
-    const gy = this.world.groundHeight(this.pos.x, this.pos.z, this.pos.y + 0.6);
-    if (this.pos.y > gy + 0.6 || this.fallSpeed > 0) {
-      this.fallSpeed += 9.81 * dt;
-      this.pos.y -= this.fallSpeed * dt;
-      if (this.pos.y <= gy) {
-        this.pos.y = gy;
-        this.fallSpeed = 0;
-      }
-    } else {
-      this.pos.y = damp(this.pos.y, gy, 30, dt);
-      if (Math.abs(this.pos.y - gy) > 0.6) this.pos.y = gy;
+    // Fast (an energy drink) or on a slow frame the step is split up, so that
+    // no wall or ramp side is skipped and the climb up a ramp keeps up.
+    const n = Math.max(1, Math.ceil(Math.hypot(moveX, moveZ) / MAX_STEP));
+    for (let i = 0; i < n; i++) {
+      const prevX = this.pos.x;
+      this.pos.x += moveX / n;
+      this.pos.z += moveZ / n;
+      // Never walk backwards past the start line.
+      if (this.pos.z > CFG.path.startLineZ) this.pos.z = CFG.path.startLineZ;
+      this.collide();
+      this.keepInCutting(prevX);
+      this.followGround(dt / n);
     }
 
     // ----- walk cycle, bob, footsteps
@@ -361,6 +315,88 @@ export class Player {
     if (!paused) this.dribble(apple, speed);
 
     this.applyTransform();
+  }
+
+  /** Pushes the player out of every obstacle nearby. */
+  private collide(): void {
+    this.inBush = 0;
+    this.world.colliders.forEachNear(this.pos.z, (col) => {
+      const pr = CFG.player.radius;
+      if (col.kind === 'sphere') {
+        if (col.surface.soft) {
+          // Bushes slow the player down but can be pushed through.
+          const dx = this.pos.x - col.x;
+          const dz = this.pos.z - col.z;
+          const dd = dx * dx + dz * dz;
+          const rr = (col.r + pr * 0.5) ** 2;
+          if (dd < rr && Math.abs(this.pos.y + 0.6 - col.y) < col.r + 0.6) this.inBush = 1;
+          return;
+        }
+        if (!col.blocksPlayer) return;
+        if (col.y - col.r > this.pos.y + 1.6 || col.y + col.r < this.pos.y + 0.05) return;
+        this.pushOutCircle(col.x, col.z, col.r + pr);
+      } else if (col.kind === 'cylinder') {
+        if (!col.blocksPlayer) return;
+        if (col.yTop < this.pos.y + 0.3) return;
+        this.pushOutCircle(col.x, col.z, col.r + pr);
+      } else if (col.kind === 'capsule') {
+        if (!col.blocksPlayer) return;
+        const top = Math.max(col.ay, col.by) + col.r;
+        const bottom = Math.min(col.ay, col.by) - col.r;
+        if (top < this.pos.y + 0.25 || bottom > this.pos.y + 1.7) return;
+        // Closest point on the segment in the XZ plane.
+        const abx = col.bx - col.ax;
+        const abz = col.bz - col.az;
+        const len2 = abx * abx + abz * abz;
+        let t = len2 > 0 ? ((this.pos.x - col.ax) * abx + (this.pos.z - col.az) * abz) / len2 : 0;
+        t = clamp(t, 0, 1);
+        this.pushOutCircle(col.ax + abx * t, col.az + abz * t, col.r + pr);
+      } else if (col.kind === 'box') {
+        if (col.maxY < this.pos.y + 0.25 || col.minY > this.pos.y + 1.7) return;
+        this.pushOutBox(col.minX, col.minZ, col.maxX, col.maxZ, pr);
+      } else if (col.kind === 'ramp') {
+        // The side of a ramp; walking up its slope is terrain following.
+        if (rampTop(col, -this.pos.z) < this.pos.y + 0.25) return;
+        this.pushOutBox(col.minX, -col.pHigh, col.maxX, -col.pLow, pr);
+      } else if (col.kind === 'wall') {
+        const abx = col.bx - col.ax;
+        const abz = col.bz - col.az;
+        const len2 = abx * abx + abz * abz;
+        const t = clamp(len2 > 0 ? ((this.pos.x - col.ax) * abx + (this.pos.z - col.az) * abz) / len2 : 0, 0, 1);
+        this.pushOutCircle(col.ax + abx * t, col.az + abz * t, pr);
+      }
+    });
+  }
+
+  /**
+   * The walls of the subway cutting are thin: a player that was inside them
+   * stays inside, even if pushed hard against them.
+   */
+  private keepInCutting(prevX: number): void {
+    const half = subwayWallHalf(-this.pos.z);
+    if (half === Infinity || Math.abs(prevX) > half) return;
+    const max = half - CFG.player.radius;
+    if (Math.abs(this.pos.x) > max) {
+      this.pos.x = Math.sign(this.pos.x) * max;
+      this.vel.x = 0;
+    }
+  }
+
+  /** Train roofs and ramps carry the player from above; off the end of a roof they fall. */
+  private followGround(dt: number): void {
+    const gy = this.world.groundHeight(this.pos.x, this.pos.z, this.pos.y + 0.6);
+    if (this.pos.y > gy + 0.6 || this.fallSpeed > 0) {
+      this.fallSpeed += 9.81 * dt;
+      this.pos.y -= this.fallSpeed * dt;
+      if (this.pos.y <= gy) {
+        this.pos.y = gy;
+        this.fallSpeed = 0;
+      }
+    } else {
+      // Smooth over bumps, but up a ramp stay on it (the sides of a ramp only stop a player below its slope).
+      this.pos.y = Math.max(damp(this.pos.y, gy, 30, dt), gy - 0.1);
+      if (Math.abs(this.pos.y - gy) > 0.6) this.pos.y = gy;
+    }
   }
 
   private pushOutCircle(cx: number, cz: number, minDist: number, positionOnly = false): void {

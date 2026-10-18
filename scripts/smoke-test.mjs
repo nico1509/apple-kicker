@@ -628,6 +628,36 @@ try {
   check(energy.cans === energy.n, `the subway has energy drink cans instead of bottles (${energy.cans}/${energy.n})`);
   check(Math.abs(energy.first - 4) < 0.05 && Math.abs(energy.later - 2) < 0.1 && Math.abs(energy.again - 4) < 0.05, `a can boosts for 4 s and another one restarts it (${energy.first.toFixed(2)}, ${energy.later.toFixed(2)}, ${energy.again.toFixed(2)})`);
   check(Math.abs(energy.boosted / energy.normal - 2) < 0.01 && energy.end === 0, `the boost doubles the sprint speed (${energy.normal.toFixed(1)} → ${energy.boosted.toFixed(1)} m/s)`);
+  // Even boosted and on a slow frame rate the player runs straight up a ramp and stays inside the walls.
+  const fast = await page.evaluate((t) => {
+    const k = window.__appleKicker;
+    const g = k.game;
+    const run = (x, p, yaw, secs, each) => {
+      k.teleport(p - 2);
+      g.storm.progress = p - 200;
+      g.debugThirst(1);
+      g.debugPlayer(x, -p, 0);
+      k.look(yaw, 0);
+      g.input.keys.add('KeyW');
+      g.input.keys.add('ShiftLeft');
+      for (let i = 0; i < secs * 20; i++) {
+        g.player.boost(4);
+        g.player.stamina = 1;
+        g.update(1 / 20);
+        each();
+      }
+      g.input.keys.delete('KeyW');
+      g.input.keys.delete('ShiftLeft');
+    };
+    let drift = 0;
+    run(t.x, t.p0 - 8, 0, 1.6, () => (drift = Math.max(drift, Math.abs(g.player.pos.x - t.x))));
+    const roof = g.player.pos.y - g.world.terrain.groundHeight(g.player.pos.x, g.player.pos.z);
+    let out = 0;
+    for (const side of [-1, 1]) run(side * 3.5, t.p0 - 30, -side * 0.5, 2, () => (out = Math.max(out, Math.abs(g.player.pos.x))));
+    return { drift, roof, out };
+  }, ramp);
+  check(fast.drift < 0.05 && fast.roof > 3, `a boosted sprint at 20 fps goes straight up the ramp (${fast.drift.toFixed(2)} m aside, ${fast.roof.toFixed(2)} m up)`);
+  check(fast.out < 5.45, `a boosted sprint into the wall stays in the cutting (${fast.out.toFixed(2)} m)`);
   const respawnOnTrain = await page.evaluate((t) => window.__appleKicker.game.respawnClear(t.front + 2), sub.trains.find((t) => t.x === 0));
   check(!respawnOnTrain, 'nobody respawns on a train');
 
