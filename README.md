@@ -12,6 +12,8 @@ English otherwise).
 
 ## Playing
 
+Play here: https://nico-assfalg.de/apple-kicker/
+
 All you need is Node.js (≥ 20.19 or ≥ 22.12) and a browser with WebGL.
 
 ```bash
