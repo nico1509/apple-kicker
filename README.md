@@ -61,7 +61,8 @@ Auf Handys und Tablets erscheinen automatisch halbtransparente Bedienelemente:
   mit der Strecke schneller und lässt zwischendurch wieder nach. Holt sie **dich oder
   deinen Apfel** ein, kostet das ein Leben.
 * Kicken macht durstig: Die **Durst-Anzeige** leert sich schnell. Auf dem Weg schweben
-  Apfelschorle-Flaschen, jede füllt die Anzeige wieder ganz auf. Ist sie leer, bist du
+  Apfelschorle-Flaschen, jede füllt die Anzeige und
+  deine Ausdauer wieder ganz auf. Ist sie leer, bist du
   verdurstet – das kostet ebenfalls ein Leben.
 * Im Startmenü wählst du den Modus:
   * **Story**: Der Weg hat ein Ziel – jede Etappe kommt nur einmal. Schaffst du es bis ans Ende?

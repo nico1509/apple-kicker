@@ -842,13 +842,14 @@ export class Game {
     this.hud.message('Ein Leben zurück!', 2400, 'good');
   }
 
-  /** The thirst bar drains fast; a bottle on the path fills it up again. Empty costs a life. */
+  /** The thirst bar drains fast; a bottle on the path fills it (and the stamina) up again. Empty costs a life. */
   private updateThirst(dt: number): void {
     if (this.state !== 'playing') return;
     const got = this.world.bottles.collect(this.player.pos);
     if (got > 0) {
       this.bottles += got;
       this.thirst = Math.min(1, this.thirst + got * CFG.thirst.refill);
+      this.player.refillStamina();
       this.audio.drink();
       this.hint('Apfelschorle! Ahh …', 1100, 'good');
     }
