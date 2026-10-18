@@ -20,7 +20,15 @@ export type Collider =
       blocksPlayer: boolean;
     }
   /** Invisible vertical wall from (ax, az) to (bx, bz): stops only the player, never the apple. */
-  | { kind: 'wall'; ax: number; az: number; bx: number; bz: number; surface: Surface; blocksPlayer: true };
+  | { kind: 'wall'; ax: number; az: number; bx: number; bz: number; surface: Surface; blocksPlayer: true }
+  /** Axis-aligned box (the walls of the cabin): stops the apple and the player. */
+  | {
+      kind: 'box';
+      minX: number; minY: number; minZ: number;
+      maxX: number; maxY: number; maxZ: number;
+      surface: Surface;
+      blocksPlayer: true;
+    };
 
 export interface MudZone {
   x: number;
@@ -99,6 +107,34 @@ export function sphereContact(
         out.nx = dx / dist; out.ny = dy / dist; out.nz = dz / dist;
       }
       out.depth = depth;
+      out.surface = col.surface;
+      return out;
+    }
+    case 'box': {
+      const qx = Math.min(Math.max(cx, col.minX), col.maxX);
+      const qy = Math.min(Math.max(cy, col.minY), col.maxY);
+      const qz = Math.min(Math.max(cz, col.minZ), col.maxZ);
+      const dx = cx - qx;
+      const dy = cy - qy;
+      const dz = cz - qz;
+      const d2 = dx * dx + dy * dy + dz * dz;
+      if (d2 > 1e-10) {
+        if (d2 >= radius * radius) return null;
+        const dist = Math.sqrt(d2);
+        out.nx = dx / dist; out.ny = dy / dist; out.nz = dz / dist;
+        out.depth = radius - dist;
+      } else {
+        // Centre inside: push out through the nearest face.
+        const faces: Array<[number, number, number, number]> = [
+          [cx - col.minX, -1, 0, 0], [col.maxX - cx, 1, 0, 0],
+          [cy - col.minY, 0, -1, 0], [col.maxY - cy, 0, 1, 0],
+          [cz - col.minZ, 0, 0, -1], [col.maxZ - cz, 0, 0, 1],
+        ];
+        let best = faces[0];
+        for (const f of faces) if (f[0] < best[0]) best = f;
+        out.nx = best[1]; out.ny = best[2]; out.nz = best[3];
+        out.depth = best[0] + radius;
+      }
       out.surface = col.surface;
       return out;
     }

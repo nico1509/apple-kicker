@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { CFG } from '../config';
 import { Bottles } from './bottles';
+import { Cabin } from './cabin';
 import { ColliderStore } from './colliders';
 import { Decor } from './decor';
 import { Obstacles } from './obstacles';
@@ -12,6 +13,7 @@ interface Chunk {
   decor: THREE.Group;
   obstacles: THREE.Group;
   bottles: THREE.Group;
+  cabin: THREE.Group | null;
 }
 
 /** Time budget per frame for incremental chunk generation. */
@@ -28,6 +30,8 @@ export class World {
   readonly decor: Decor;
   readonly obstacles: Obstacles;
   readonly bottles: Bottles;
+  /** The cabin at the end of the story mode (builds nothing in the endless mode). */
+  readonly cabin: Cabin;
   readonly group = new THREE.Group();
   private readonly chunks = new Map<number, Chunk>();
   private readonly groundMat = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true });
@@ -40,6 +44,7 @@ export class World {
     this.terrain = new Terrain(seed);
     this.decor = new Decor(this.terrain, this.colliders);
     this.obstacles = new Obstacles(this.terrain, this.colliders);
+    this.cabin = new Cabin(this.terrain, this.colliders);
     this.bottles = new Bottles(this.terrain, this.colliders);
     this.group.name = 'world';
   }
@@ -64,10 +69,12 @@ export class World {
     const decor = this.decor.buildChunk(i);
     yield;
     const obstacles = this.obstacles.buildChunk(i);
+    const cabin = this.cabin.buildChunk(i);
     // After the obstacles so the bottles can keep clear of them.
     const bottles = this.bottles.buildChunk(i);
     this.group.add(ground, far, decor, obstacles, bottles);
-    this.chunks.set(i, { ground, far, decor, obstacles, bottles });
+    if (cabin) this.group.add(cabin);
+    this.chunks.set(i, { ground, far, decor, obstacles, bottles, cabin });
     this.generated = Math.max(this.generated, i);
   }
 
@@ -82,6 +89,10 @@ export class World {
     const c = this.chunks.get(i);
     if (!c) return;
     this.group.remove(c.ground, c.far, c.decor, c.obstacles, c.bottles);
+    if (c.cabin) {
+      this.group.remove(c.cabin);
+      Decor.disposeGroup(c.cabin);
+    }
     c.ground.geometry.dispose();
     c.far.geometry.dispose();
     Decor.disposeGroup(c.decor);
@@ -152,6 +163,7 @@ export class World {
     this.decor.dispose();
     this.obstacles.dispose();
     this.bottles.dispose();
+    this.cabin.dispose();
     this.groundMat.dispose();
     this.farMat.dispose();
     this.colliders.clear();

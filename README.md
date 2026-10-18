@@ -55,7 +55,11 @@ dem Apfel außerdem einen leichten Drall nach innen (linker Fuß: nach rechts, r
 * Kicken macht durstig: Die **Durst-Anzeige** leert sich schnell. Auf dem Weg schweben
   Apfelschorle-Flaschen, jede füllt die Anzeige wieder ganz auf. Ist sie leer, bist du
   verdurstet – das kostet ebenfalls ein Leben.
-* Im Startmenü wählst du die Schwierigkeit:
+* Im Startmenü wählst du den Modus:
+  * **Story**: Der Weg hat ein Ziel – jede Etappe kommt nur einmal. Schaffst du es bis ans Ende?
+  * **Endlos**: Der Weg hört nie auf. Dieser Modus wird freigeschaltet, sobald du den
+    Story-Modus geschafft hast.
+* Außerdem wählst du die Schwierigkeit (in beiden Modi):
   * **Schwer**: ein Leben – eingeholt ist der Lauf vorbei.
   * **Einfach**: drei Leben (oben als Äpfel angezeigt). Nach dem Einholen kannst du
     **weitermachen** – Spieler, Apfel und Gewitter stehen dann wie beim Start auf dem Weg,
@@ -67,7 +71,8 @@ dem Apfel außerdem einen leichten Drall nach innen (linker Fuß: nach rechts, r
   Pfützen, umgestürzte Stämme und Hügel. Kick fester, lupf drüber oder such dir
   einen Weg drum herum.
 * Auf den Fahrspuren rollt der Apfel am besten, auf Wiese und Acker bremst er schneller.
-* Der Rekord wird für jede Schwierigkeit getrennt im Browser (localStorage) gespeichert.
+* Der Rekord wird für jeden Modus und jede Schwierigkeit getrennt im Browser (localStorage) gespeichert,
+  ebenso die Freischaltung des Endlos-Modus.
 
 ## Technik
 

@@ -4,10 +4,10 @@ import { smoothstep } from '../utils/math';
 import { fbm2, hash3, mulberry32, rand, subSeed, type Rng } from '../utils/noise';
 import { ColliderStore, SURFACES, type Collider } from './colliders';
 import { landscapeAt, landscapeWeight } from './landscape';
-import { GORGE, ROAD, Terrain, type BiomeType, type Side } from './terrain';
+import { GORGE, HUT, ROAD, Terrain, type BiomeType, type Side } from './terrain';
 
 /** Collects instance transforms and colours, then bakes them into an InstancedMesh. */
-class Batch {
+export class Batch {
   readonly matrices: number[] = [];
   readonly colors: number[] = [];
   count = 0;
@@ -100,6 +100,10 @@ const RESEARCH_GREY = C(0x8a9096);
 const RESEARCH_BLACK = C(0x24262a);
 const RESEARCH_WHITE = C(0xf2f2ee);
 const SOLAR = C(0x24407a);
+/** Frosted firs of the snowy forest at home: dark needles under thick snow. */
+const SNOW_FIR_GREEN = [C(0x2b4634), C(0x30503a), C(0x26402f)];
+const SNOW_FIR = [C(0xe8eff4), C(0xdbe5ec), C(0xcfdbe4), C(0xf2f6f9)];
+const SNOW_BUSH = [C(0xe4ecf2), C(0xd6e1e9), C(0xc8d5df)];
 const TRUNK_COLORS = [C(0x6b4d33), C(0x7a5a3c), C(0x5a4330)];
 // The small town.
 const BARK = [C(0x5a5048), C(0x6b6056), C(0x4e463f), C(0x625a50)];
@@ -195,7 +199,16 @@ export class Decor {
     return g !== null && Math.abs(x - g.x) < GORGE.reach + margin;
   }
 
+  /** True in the clearing round the cabin at the end of the story, where nothing grows. */
+  private nearHut(x: number, z: number, margin = 0): boolean {
+    const hut = this.terrain.hut();
+    if (!hut) return false;
+    const u = -z - hut.p;
+    return u > -16 - margin && u < HUT.depth + 4 + margin && Math.abs(x - hut.cx) < HUT.width / 2 + 5 + margin;
+  }
+
   private addCollider(chunk: number, c: Collider): void {
+    if (c.kind === 'box') return;
     const x = c.kind === 'capsule' || c.kind === 'wall' ? (c.ax + c.bx) / 2 : c.x;
     const z = c.kind === 'capsule' || c.kind === 'wall' ? (c.az + c.bz) / 2 : c.z;
     if (!this.inGorge(x, z)) this.colliders.add(chunk, c);
@@ -282,6 +295,26 @@ export class Decor {
       const r = baseR * (1 - t * 0.45);
       const th = h * 0.42;
       this.place(b.cone, x, y + h * 0.22 + t * h * 0.55, z, r, th, r, rng() * 6.28, this.pickColor(CANOPY_COLORS.fir, rng));
+    }
+    this.addCollider(chunk, { kind: 'cylinder', x, z, r: tr + 0.08, yTop: y + h, surface: SURFACES.trunk, blocksPlayer: true });
+  }
+
+  /** A fir under thick snow: dark green tiers, each capped with a white one. */
+  private addSnowyFir(b: Batches, chunk: number, x: number, z: number, rng: Rng): void {
+    const y = this.terrain.groundHeight(x, z) - 0.15;
+    const h = rand(rng, 5, 12);
+    const tr = rand(rng, 0.15, 0.26);
+    this.place(b.trunk, x, y, z, tr, h * 0.3, tr, rng() * 6.28, this.pickColor(TRUNK_COLORS, rng));
+    const tiers = 4;
+    const baseR = h * rand(rng, 0.2, 0.25);
+    for (let i = 0; i < tiers; i++) {
+      const t = i / tiers;
+      const r = baseR * (1 - t * 0.55);
+      const th = h * 0.36;
+      const ty = y + h * 0.18 + t * h * 0.6;
+      const yaw = rng() * 6.28;
+      this.place(b.cone, x, ty, z, r, th, r, yaw, this.pickColor(SNOW_FIR_GREEN, rng));
+      this.place(b.cone, x, ty + th * 0.12, z, r * 0.94, th * 0.92, r * 0.94, yaw + 0.4, this.pickColor(SNOW_FIR, rng, 0.04));
     }
     this.addCollider(chunk, { kind: 'cylinder', x, z, r: tr + 0.08, yTop: y + h, surface: SURFACES.trunk, blocksPlayer: true });
   }
@@ -432,7 +465,7 @@ export class Decor {
       const z = -p;
       const y = this.terrain.groundHeight(x, z) + 0.012;
       const s = rand(rng, 0.05, 0.1);
-      if (rng() < landscapeWeight(p, 'desert') + landscapeWeight(p, 'antarctic')) continue;
+      if (rng() < landscapeWeight(p, 'desert') + landscapeWeight(p, 'antarctic') + landscapeWeight(p, 'home')) continue;
       // Only a few wet, dark leaves on the asphalt of the town.
       const town = landscapeWeight(p, 'town');
       if (town > 0 && rng() < town) {
@@ -474,7 +507,7 @@ export class Decor {
       else d = rand(rng, 1.3, 30);
       if ((biome === 'dunes' && rng() < 0.75) || (biome === 'blackdesert' && rng() < 0.85)) continue;
       // No grass in the snow; a few dry tufts only between the rocks of the rookery.
-      if (biome === 'snowfield' || biome === 'shore' || (biome === 'rookery' && rng() < 0.8)) continue;
+      if (biome === 'snowfield' || biome === 'shore' || biome === 'snowwood' || (biome === 'rookery' && rng() < 0.8)) continue;
       const town = biome === 'townhouses' || biome === 'gardens' || biome === 'fallow';
       if (town) {
         // Winter grass beside the road, none on the pavement.
@@ -509,6 +542,17 @@ export class Decor {
         const ax = rand(rng, CFG.chunk.halfWidth + 3, CFG.chunk.farExtent - 10);
         const x = side * ax;
         const z = rand(rng, zFar, zNear);
+        if (rng() < landscapeWeight(-z, 'home')) {
+          // Frosted woods on the snowy hills.
+          const n = fbm2(x * 0.01, z * 0.01, this.terrain.seed + 51, 3);
+          if (n > 0.25 && ax < 150 && rng() < 0.8) continue;
+          const y = this.terrain.groundHeight(x, z) - 0.5;
+          const h = rand(rng, 7, 14) * (1 + smoothstep(150, 300, ax) * 0.6);
+          const c = this.pickColor(rng() < 0.75 ? SNOW_FIR : SNOW_FIR_GREEN, rng, 0.05);
+          if (rng() < 0.7) this.place(b.farCone, x, y, z, h * 0.28, h, h * 0.28, rng() * 6.28, c);
+          else this.place(ax < 100 ? b.farBlob : b.farBlobLod, x, y + h * 0.4, z, h * 0.4, h * 0.5, h * 0.4, rng() * 6.28, c);
+          continue;
+        }
         if (rng() < landscapeWeight(-z, 'antarctic')) {
           // Ice floes and the odd iceberg drifting on the sea.
           if (rng() < 0.8) continue;
@@ -1671,7 +1715,7 @@ export class Decor {
         const x = cx + side * d;
         const z = -p;
         if (Math.abs(x) > CFG.chunk.halfWidth - 1.5) continue;
-        if (this.inGorge(x, z, 2.5)) continue;
+        if (this.inGorge(x, z, 2.5) || this.nearHut(x, z)) continue;
         switch (biome) {
           case 'forest': {
             if (d < 3.2) {
@@ -1888,6 +1932,20 @@ export class Decor {
             } else if (r < 0.07 && d > 5 && d < 7 && !tooClose(x, z, 1.2)) {
               const bx = this.addBush(b, i, x, z, rng, rand(rng, 0.5, 0.9), CANOPY_COLORS.winterBush);
               placed.push([bx, z, 0.8]);
+            }
+            break;
+          }
+          case 'snowwood': {
+            // A deep, frosted fir forest with white shrubs along the path.
+            if (d < 3.4) {
+              if (rng() < 0.22 && !tooClose(x, z, 1.2)) {
+                const bx = this.addBush(b, i, x, z, rng, rand(rng, 0.4, 0.8), SNOW_BUSH);
+                placed.push([bx, z, 0.8]);
+              }
+            } else if (rng() < 0.5 && !tooClose(x, z, 2.4)) {
+              if (rng() < 0.9) this.addSnowyFir(b, i, x, z, rng);
+              else this.addSnowyRock(b, i, x, z, rng, 0.8);
+              placed.push([x, z, 1.5]);
             }
             break;
           }

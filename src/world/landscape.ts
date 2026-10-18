@@ -3,13 +3,30 @@ import { CFG } from '../config';
 import { smoothstep } from '../utils/math';
 
 /**
- * Landscapes change every LANDSCAPE_LENGTH metres along the path and loop:
- * after the last one the first one (the autumn forest) comes back.
+ * Landscapes change every LANDSCAPE_LENGTH metres along the path. In the
+ * endless mode they loop: after the last one the first one (the autumn forest)
+ * comes back. In the story mode every one comes once, then the snowy home
+ * stretch with the hut at the end of the path.
  */
-export type Landscape = 'forest' | 'greece' | 'desert' | 'antarctic' | 'town';
+export type Landscape = 'forest' | 'greece' | 'desert' | 'antarctic' | 'town' | 'home';
 
 export const LANDSCAPE_LENGTH = 1000;
 export const LANDSCAPES: readonly Landscape[] = ['forest', 'greece', 'desert', 'antarctic', 'town'];
+/** Start of the home stretch in the story mode. */
+export const HOME_START = LANDSCAPES.length * LANDSCAPE_LENGTH;
+/** Story mode: the path ends this far into the home stretch, at the door of the hut. */
+export const HUT_PROGRESS = HOME_START + 60;
+
+let story = false;
+
+/** Choose the mode before a world is built: the story ends at the hut, the endless mode loops. */
+export function setStoryMode(on: boolean): void {
+  story = on;
+}
+
+export function storyMode(): boolean {
+  return story;
+}
 /** Half width (m) of the cross-fade of colours, light and backdrop at a landscape border. */
 const BLEND = 40;
 
@@ -22,6 +39,7 @@ export interface LandscapeMix {
 const mod = (a: number, n: number): number => ((a % n) + n) % n;
 
 export function landscapeOfIndex(k: number): Landscape {
+  if (story && k >= LANDSCAPES.length) return 'home';
   return LANDSCAPES[mod(k, LANDSCAPES.length)];
 }
 
@@ -135,6 +153,19 @@ export const ATMOSPHERES: Record<Landscape, Atmosphere> = {
     fogFar: 250,
     cirrus: 0,
     clouds: 1,
+  },
+  // Home: a snowy forest on a winter afternoon, the sun already low and warm.
+  home: {
+    horizon: new THREE.Color(0xdcd2d8),
+    top: new THREE.Color(0x5d78a8),
+    hemiSky: new THREE.Color(0xc2cde2),
+    hemiGround: new THREE.Color(0x7f8ca4),
+    sun: new THREE.Color(0xffd6b0),
+    sunIntensity: 2.0,
+    fogNear: 60,
+    fogFar: 240,
+    cirrus: 0.25,
+    clouds: 0.45,
   },
 };
 

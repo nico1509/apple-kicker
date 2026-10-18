@@ -183,6 +183,8 @@ export class Obstacles {
       const p = p0 + slot * (k + 0.15 + rng() * 0.7);
       // Keep obstacles off very steep bits of track, and off the bridges and their approaches.
       if (Math.abs(this.terrain.pathSlope(p)) > 0.3) continue;
+      // The last bit of the way home is free.
+      if (landscapeAt(p) === 'home') continue;
       if (this.terrain.gorgeNear(p, GORGE.deckHalfLen + 8)) continue;
       let kind = this.pickKind(p, rng);
       // A log at the foot of a descent traps the apple (it rolls back into the

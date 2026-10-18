@@ -134,6 +134,9 @@ export class Bottles {
     for (let k = 0; this.spot(k) < p1; k++) {
       const s = this.spot(k);
       if (s < p0) continue;
+      // The path ends at the cabin of the story mode.
+      const hut = this.terrain.hut();
+      if (hut && s > hut.p - 4) break;
       const key = `${k}`;
       if (this.taken.has(key)) continue;
       const dx = rand(rng, -0.4, 0.4);
