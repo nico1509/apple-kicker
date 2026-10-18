@@ -651,6 +651,7 @@ try {
   await simulate(0.1);
   const k0 = await state();
   check(await page.evaluate(() => document.fullscreenElement === document.documentElement), 'starting a run with a click enters fullscreen');
+  check(await page.evaluate(() => document.pointerLockElement === document.querySelector('canvas')), 'the cursor is captured after entering fullscreen');
   await look(k0.playerYaw, -0.3);
   await simulate(0.05);
   await shot('11-kickstart.png');
