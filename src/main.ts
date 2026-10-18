@@ -9,6 +9,8 @@ declare global {
       restart: () => void;
       kickstart: () => void;
       setDifficulty: (d: 'easy' | 'hard') => void;
+      setMode: (m: 'story' | 'endless') => void;
+      unlockEndless: (on?: boolean) => void;
       kick: (dx: number, dy: number, foot: 'left' | 'right', chip?: boolean) => void;
       simulate: (seconds: number, keys?: string[]) => void;
       look: (yaw: number, pitch: number) => void;
@@ -31,11 +33,13 @@ function boot(): void {
         if (game.state === 'menu') game.start();
         else if (game.state === 'paused') game.resume();
         else if (game.state === 'lifelost') game.continueRun();
-        else if (game.state === 'over') game.restart();
+        else if (game.state === 'over' || game.state === 'won') game.restart();
       },
       restart: () => game.restart(),
       kickstart: () => game.kickstart(),
       setDifficulty: (d) => game.setDifficulty(d),
+      setMode: (m) => game.setMode(m),
+      unlockEndless: (on = true) => game.debugUnlock(on),
       kick: (dx, dy, foot, chip = false) => game.debugKick(dx, dy, foot, chip),
       simulate: (seconds, keys = []) => game.simulate(seconds, keys),
       look: (yaw, pitch) => game.debugLook(yaw, pitch),

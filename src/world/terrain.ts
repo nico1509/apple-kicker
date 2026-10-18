@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { CFG } from '../config';
 import { clamp, lerp, smoothstep } from '../utils/math';
 import { fbm1, fbm2, hash3, mulberry32, noise1, subSeed, valueNoise2 } from '../utils/noise';
-import { LANDSCAPE_LENGTH, landscapeOfIndex, landscapeWeight, type Landscape } from './landscape';
+import { HUT_PROGRESS, LANDSCAPE_LENGTH, landscapeOfIndex, landscapeWeight, storyMode, type Landscape } from './landscape';
 
 /**
  * Coordinate conventions
@@ -18,7 +18,8 @@ export type BiomeType =
   | 'phrygana' | 'olive' | 'stubble' | 'farmstead'
   | 'dunes' | 'oasis' | 'ruins' | 'blackdesert'
   | 'snowfield' | 'shore' | 'rookery'
-  | 'townhouses' | 'gardens' | 'fallow';
+  | 'townhouses' | 'gardens' | 'fallow'
+  | 'snowwood';
 export type Side = -1 | 1;
 
 export interface BiomeMix {
@@ -43,6 +44,7 @@ const SLOPE_BIAS: Record<BiomeType, number> = {
   dunes: 0.04, oasis: -0.03, ruins: 0.03, blackdesert: 0.02,
   snowfield: 0.06, shore: -0.16, rookery: 0.1,
   townhouses: 0, gardens: 0.03, fallow: 0.04,
+  snowwood: 0.05,
 };
 /** Rolling resistance (m/s²) of the ground beside the lane. */
 const ROLL_RES: Record<BiomeType, number> = {
@@ -51,6 +53,7 @@ const ROLL_RES: Record<BiomeType, number> = {
   dunes: 3.4, oasis: 2.2, ruins: 2.4, blackdesert: 2.6,
   snowfield: 3.0, shore: 2.8, rookery: 2.4,
   townhouses: 1.3, gardens: 2.1, fallow: 2.4,
+  snowwood: 3.0,
 };
 const BIOME_WEIGHTS: Record<Landscape, Array<[BiomeType, number]>> = {
   forest: [
@@ -82,6 +85,7 @@ const BIOME_WEIGHTS: Record<Landscape, Array<[BiomeType, number]>> = {
     ['gardens', 0.36],
     ['fallow', 0.26],
   ],
+  home: [['snowwood', 1]],
 };
 /**
  * In the small town the track is an asphalt road: wider than the dirt track,
@@ -128,6 +132,39 @@ export const GORGE = {
   /** The deck lies this much above the track so the planks never cut into the ground. */
   lift: 0.06,
 } as const;
+/**
+ * The log cabin at the end of the story. It faces the path; its open door sits
+ * on the path centre line, left of the middle of the front wall. Lengths in m.
+ */
+export const HUT = {
+  /** Width along x and depth along the path. */
+  width: 8,
+  depth: 5.6,
+  /** Height of the walls; the ridge of the roof is `ridge` higher. */
+  wall: 2.5,
+  ridge: 1.5,
+  /** Centre of the door relative to the middle of the front wall, and its size. */
+  doorX: -2,
+  doorWidth: 1.3,
+  doorHeight: 2.05,
+  /** Thickness of the log walls. */
+  log: 0.34,
+} as const;
+
+/** Story mode: where the path ends at the cabin. */
+export interface Hut {
+  /** Progress of the front wall. */
+  p: number;
+  /** x of the door (the path centre line). */
+  x: number;
+  /** x of the middle of the cabin. */
+  cx: number;
+  /** Height of the floor and of the flattened clearing around it. */
+  h: number;
+}
+/** Over this distance before the cabin the track eases into a straight, level line. */
+const HUT_FLAT = 46;
+
 /** Over this distance from a gorge the track eases into a straight, level line. */
 const GORGE_FLAT = 42;
 /** Search ranges (m into a Greek section) for the first and the second gorge. */
@@ -142,6 +179,7 @@ export class Terrain {
   private readonly seaCache = new Map<number, number>();
   private readonly mixScratch: BiomeMix = { a: 'meadow', b: 'meadow', t: 1 };
   private readonly gorgeCache = new Map<number, Gorge[]>();
+  private hutCache: Hut | null | undefined = undefined;
 
   constructor(seed: number) {
     this.seed = seed >>> 0;
@@ -154,6 +192,8 @@ export class Terrain {
 
   pathCenterX(p: number): number {
     const x = this.rawCenterX(p);
+    const hut = this.hut();
+    if (hut && p > hut.p - HUT_FLAT) return lerp(x, hut.x, smoothstep(hut.p - HUT_FLAT, hut.p - 10, p));
     const g = this.gorgeNear(p, GORGE_FLAT);
     if (!g) return x;
     return lerp(x, g.x, 1 - smoothstep(GORGE.deckHalfLen + 1, GORGE_FLAT, Math.abs(p - g.p)));
@@ -244,6 +284,8 @@ export class Terrain {
   /** Height of the path centre line. */
   pathHeight(p: number): number {
     const h = this.rawPathHeight(p);
+    const hut = this.hut();
+    if (hut && p > hut.p - HUT_FLAT) return lerp(h, hut.h, smoothstep(hut.p - HUT_FLAT, hut.p - 10, p));
     const g = this.gorgeNear(p, GORGE_FLAT);
     if (!g) return h;
     return lerp(h, g.h, 1 - smoothstep(GORGE.deckHalfLen + 1, GORGE_FLAT, Math.abs(p - g.p)));
@@ -278,6 +320,42 @@ export class Terrain {
     const h = lo - SEA_BELOW;
     this.seaCache.set(k, h);
     return h;
+  }
+
+  // ---------------------------------------------------------------------------
+  // The cabin at the end of the story
+
+  /** Where the path ends at the cabin; null in the endless mode. */
+  hut(): Hut | null {
+    if (this.hutCache === undefined) {
+      if (!storyMode()) this.hutCache = null;
+      else {
+        const p = HUT_PROGRESS;
+        const x = this.rawCenterX(p);
+        this.hutCache = { p, x, cx: x - HUT.doorX, h: this.rawPathHeight(p) };
+      }
+    }
+    return this.hutCache;
+  }
+
+  /**
+   * How much the ground at (x, p) is levelled to the cabin floor (0..1): the
+   * cabin and a clearing round it are flat.
+   */
+  hutClearing(x: number, p: number): number {
+    const hut = this.hut();
+    if (!hut) return 0;
+    const u = p - hut.p;
+    if (u < -20 || u > HUT.depth + 12) return 0;
+    const dx = Math.abs(x - hut.cx) - (HUT.width / 2 + 3);
+    const du = u < 0 ? -u - 7 : u - (HUT.depth + 3);
+    return 1 - smoothstep(0, 7, Math.max(dx, du, 0));
+  }
+
+  /** 0 before the cabin, 1 from its front wall on: the track ends there. */
+  pathEnd(p: number): number {
+    const hut = this.hut();
+    return hut ? smoothstep(hut.p - 2, hut.p + 0.5, p) : 0;
   }
 
   // ---------------------------------------------------------------------------
@@ -495,6 +573,8 @@ export class Terrain {
       }
       h = lerp(h, ha, a);
     }
+    const clearing = this.hutClearing(x, -z);
+    if (clearing > 0) h = lerp(h, this.hut()!.h, clearing);
     if (gorge && !(deck && Math.abs(x - gorge.x) < GORGE.deckHalf && Math.abs(-z - gorge.p) < GORGE.deckHalfLen)) {
       h -= this.carveOf(gorge, -z, x - gorge.x);
     }
@@ -728,6 +808,11 @@ export class Terrain {
         }
         return out;
       }
+      case 'snowwood': {
+        // Deep snow in the forest, bluish in the hollows and under the firs.
+        out.copy(P.snow).lerp(P.snowShade, smoothstep(-0.25, 0.45, n) * 0.75);
+        return out.lerp(P.snowBlue, smoothstep(0.5, 0.85, valueNoise2(x * 0.1, z * 0.1, s + 95)) * 0.55);
+      }
       case 'fallow': {
         // Brown, dead grass with muddy patches.
         out.copy(P.deadGrass).lerp(P.deadGrassDark, smoothstep(-0.2, 0.5, n) * 0.8);
@@ -762,6 +847,9 @@ export class Terrain {
     const w = landscapeWeight(p, 'desert');
     const an = landscapeWeight(p, 'antarctic');
     const tw = landscapeWeight(p, 'town');
+    const hm = landscapeWeight(p, 'home');
+    // Snow on the track and verge in Antarctica and at home.
+    const sn = an + hm;
 
     if (ax > CFG.chunk.halfWidth - 2) {
       const far = ax - CFG.chunk.halfWidth;
@@ -791,13 +879,18 @@ export class Terrain {
         this.tmpA.copy(P.farTown).lerp(P.farTownDark, smoothstep(-0.3, 0.4, v));
         out.lerp(this.tmpA, tw);
       }
+      if (hm > 0) {
+        // Snowy hills under frosted woods.
+        this.tmpA.copy(P.snow).lerp(P.snowBlue, smoothstep(-0.3, 0.5, v) * 0.75);
+        out.lerp(this.tmpA, hm);
+      }
       // Blend into the detailed terrain colour.
       if (far < 0) {
-        const inner = this.groundColorInner(p, d, x, z, mix, g, w, an, this.tmpB);
+        const inner = this.groundColorInner(p, d, x, z, mix, g, w, sn, this.tmpB);
         out.lerp(inner, smoothstep(0, -2, far));
       }
     } else {
-      this.groundColorInner(p, d, x, z, mix, g, w, an, out);
+      this.groundColorInner(p, d, x, z, mix, g, w, sn, out);
     }
     if (an > 0 && y < Infinity) {
       // The sea, with floating ice floes.
@@ -823,16 +916,22 @@ export class Terrain {
 
     // Leaf-litter freckles on the track in autumn, pale gravel in Greece, light sand in the desert.
     if (ad < 2.4 && hash3(Math.floor(x * 2), Math.floor(z * 2), s + 61) > 0.9 + 0.1 * tw) {
-      out.lerp(this.tmpA.setHex(0xb07a3a).lerp(P.dryGrassPale, g).lerp(P.sandLight, w).lerp(P.snow, an), 0.3);
+      out.lerp(this.tmpA.setHex(0xb07a3a).lerp(P.dryGrassPale, g).lerp(P.sandLight, w).lerp(P.snow, sn), 0.3);
     }
     return out;
   }
 
   private readonly vergeTmp = new THREE.Color();
 
-  /** g, w, an: weights of the Greek, the desert and the Antarctic landscape (0..1) for the colours of the track and verge. */
+  /** g, w, an: weights of the Greek, the desert and the snowy landscapes (0..1) for the colours of the track and verge. */
   private groundColorInner(p: number, d: number, x: number, z: number, mix: BiomeMix, g: number, w: number, an: number, out: THREE.Color): THREE.Color {
     this.groundColorTrack(p, d, x, z, mix, g, w, an, out);
+    const end = this.pathEnd(p);
+    if (end > 0) {
+      // No track beyond the cabin: plain snow.
+      this.biomeColor('snowwood', p, d, x, z, this.roadTmp);
+      out.lerp(this.roadTmp, end);
+    }
     const tw = landscapeWeight(p, 'town');
     const ad = Math.abs(d);
     if (tw <= 0 || ad > ROAD.half + 0.15) return out;

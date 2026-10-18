@@ -251,6 +251,9 @@ export class Player {
         let t = len2 > 0 ? ((this.pos.x - col.ax) * abx + (this.pos.z - col.az) * abz) / len2 : 0;
         t = clamp(t, 0, 1);
         this.pushOutCircle(col.ax + abx * t, col.az + abz * t, col.r + pr);
+      } else if (col.kind === 'box') {
+        if (col.maxY < this.pos.y + 0.25 || col.minY > this.pos.y + 1.7) return;
+        this.pushOutBox(col.minX, col.minZ, col.maxX, col.maxZ, pr);
       } else if (col.kind === 'wall') {
         const abx = col.bx - col.ax;
         const abz = col.bz - col.az;
@@ -331,6 +334,23 @@ export class Player {
       this.vel.x -= (dx / d) * vn;
       this.vel.z -= (dz / d) * vn;
     }
+  }
+
+  /** Keeps the player's circle out of an axis-aligned rectangle (a cabin wall). */
+  private pushOutBox(minX: number, minZ: number, maxX: number, maxZ: number, r: number): void {
+    const qx = clamp(this.pos.x, minX, maxX);
+    const qz = clamp(this.pos.z, minZ, maxZ);
+    if (qx !== this.pos.x || qz !== this.pos.z) {
+      this.pushOutCircle(qx, qz, r);
+      return;
+    }
+    // Inside: out through the nearest edge.
+    const out = [this.pos.x - minX, maxX - this.pos.x, this.pos.z - minZ, maxZ - this.pos.z];
+    const k = out.indexOf(Math.min(...out));
+    if (k === 0) this.pos.x = minX - r;
+    else if (k === 1) this.pos.x = maxX + r;
+    else if (k === 2) this.pos.z = minZ - r;
+    else this.pos.z = maxZ + r;
   }
 
   private processKicks(apple: Apple): void {

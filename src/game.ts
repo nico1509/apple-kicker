@@ -8,16 +8,16 @@ import { IceMonster, RAGE_HALF_LENGTH } from './entities/icemonster';
 import { Input } from './entities/input';
 import { Player, type PlayerEvents } from './entities/player';
 import { ZombieHorde, type Zombie } from './entities/zombie';
-import { EASY_LIVES, Hud, type Cause, type Difficulty } from './ui/hud';
+import { EASY_LIVES, Hud, type Cause, type Difficulty, type Mode } from './ui/hud';
 import { clamp, lerp, smoothstep } from './utils/math';
 import { Storm } from './weather/storm';
-import { atmosphereAt, createAtmosphere, LANDSCAPE_LENGTH, landscapeAt } from './world/landscape';
+import { atmosphereAt, createAtmosphere, LANDSCAPE_LENGTH, landscapeAt, setStoryMode } from './world/landscape';
 import { Sky } from './world/sky';
 import { sphereContact, type Contact } from './world/colliders';
 import { GORGE } from './world/terrain';
 import { World } from './world/world';
 
-export type GameState = 'menu' | 'playing' | 'paused' | 'lifelost' | 'over';
+export type GameState = 'menu' | 'playing' | 'paused' | 'lifelost' | 'over' | 'won';
 export type Quality = 'low' | 'medium' | 'high';
 
 /** Quality from the URL (?quality=low|medium|high), defaulting to high. */
@@ -31,9 +31,17 @@ export function detectQuality(): Quality {
   return 'high';
 }
 
-/** Hard keeps the original key so existing records stay. */
-const BEST_KEYS: Record<Difficulty, string> = { hard: 'apple-kicker-best', easy: 'apple-kicker-best-easy' };
+/** The endless mode keeps the original keys so existing records stay. */
+const BEST_KEYS: Record<Mode, Record<Difficulty, string>> = {
+  endless: { hard: 'apple-kicker-best', easy: 'apple-kicker-best-easy' },
+  story: { hard: 'apple-kicker-best-story', easy: 'apple-kicker-best-story-easy' },
+};
 const DIFFICULTY_KEY = 'apple-kicker-difficulty';
+const MODE_KEY = 'apple-kicker-mode';
+/** Set once the story mode has been won: the endless mode is unlocked. */
+const UNLOCK_KEY = 'apple-kicker-endless-unlocked';
+/** Warm light inside the cabin at the end of the story. */
+const HOME_LIGHT = 26;
 /** The apple lies this far ahead of the player at the start and after a respawn. */
 const APPLE_AHEAD = 1.2;
 const HINT_SECONDS = 25;
@@ -64,8 +72,14 @@ export class Game {
   state: GameState = 'menu';
   elapsed = 0;
   best = 0;
-  bests: Record<Difficulty, number> = { easy: 0, hard: 0 };
+  /** Records of every mode and difficulty. */
+  records: Record<Mode, Record<Difficulty, number>> = { story: { easy: 0, hard: 0 }, endless: { easy: 0, hard: 0 } };
   difficulty: Difficulty = 'easy';
+  mode: Mode = 'story';
+  /** The endless mode is unlocked by winning the story mode. */
+  endlessUnlocked = false;
+  /** Seconds played in this run, over all lives (shown when the story is won). */
+  runTime = 0;
   /** Lives left in the easy mode. */
   lives = EASY_LIVES;
   /** Highest landscape section the player has entered in this run; each new one gives back a lost life. */
@@ -79,6 +93,7 @@ export class Game {
   private readonly sun: THREE.DirectionalLight;
   private readonly hemi: THREE.HemisphereLight;
   private readonly fog: THREE.Fog;
+  private readonly homeLight: THREE.PointLight;
   /** Clear-weather light of the landscape the player is in. */
   private readonly atmo = createAtmosphere();
   private lastTime = 0;
@@ -132,6 +147,9 @@ export class Game {
     this.sun.shadow.radius = quality === 'high' ? 3 : 1.5;
     this.scene.add(this.sun, this.sun.target);
 
+    this.homeLight = new THREE.PointLight(0xffa24a, 0, 18, 1.4);
+    this.scene.add(this.homeLight);
+
     this.sky = new Sky(this.scene, SUN_DIR);
     this.input = new Input(canvas);
     this.hud = new Hud(uiRoot);
@@ -177,12 +195,16 @@ export class Game {
       onExhausted: () => this.hint('Aus der Puste! Kurz verschnaufen …', 1300, 'bad'),
     };
 
+    this.endlessUnlocked = this.loadUnlocked();
+    this.mode = this.loadMode();
+    // The mode decides how the world goes on after the last landscape.
+    setStoryMode(this.mode === 'story');
     this.seed = (Math.random() * 0xffffffff) >>> 0;
     this.world = new World(this.seed);
     this.scene.add(this.world.group);
     this.createEntities();
 
-    this.bests = { easy: this.loadBest('easy'), hard: this.loadBest('hard') };
+    for (const m of ['story', 'endless'] as Mode[]) this.records[m] = { easy: this.loadBest(m, 'easy'), hard: this.loadBest(m, 'hard') };
     this.difficulty = this.loadDifficulty();
     this.best = this.bests[this.difficulty];
     this.hud.onStart(() => this.onOverlayClick());
@@ -200,9 +222,10 @@ export class Game {
       this.kickstart();
     });
     this.hud.onDifficulty((d) => this.setDifficulty(d));
+    this.hud.onMode((m) => this.setMode(m));
     this.hud.setDistance(0, this.best);
     this.setupWorld();
-    this.hud.showStart(this.bests, this.difficulty);
+    this.showStart();
 
     window.addEventListener('resize', this.onResize);
     window.addEventListener('blur', this.onBlur);
@@ -234,6 +257,7 @@ export class Game {
     this.spit.clear();
     this.iceMonster.reset(this.seed);
     this.elapsed = 0;
+    this.runTime = 0;
     this.lives = this.maxLives();
     this.landscapeReached = 0;
     this.quench();
@@ -277,9 +301,18 @@ export class Game {
     this.onResize();
   }
 
-  private loadBest(d: Difficulty): number {
+  /** Records of the chosen mode. */
+  get bests(): Record<Difficulty, number> {
+    return this.records[this.mode];
+  }
+
+  private showStart(): void {
+    this.hud.showStart(this.bests, this.difficulty, this.mode, this.endlessUnlocked);
+  }
+
+  private loadBest(m: Mode, d: Difficulty): number {
     try {
-      const v = Number(localStorage.getItem(BEST_KEYS[d]) ?? '0');
+      const v = Number(localStorage.getItem(BEST_KEYS[m][d]) ?? '0');
       return Number.isFinite(v) ? v : 0;
     } catch {
       return 0;
@@ -289,7 +322,7 @@ export class Game {
   private saveBest(): void {
     this.bests[this.difficulty] = this.best;
     try {
-      localStorage.setItem(BEST_KEYS[this.difficulty], String(Math.floor(this.best)));
+      localStorage.setItem(BEST_KEYS[this.mode][this.difficulty], String(Math.floor(this.best)));
     } catch {
       /* storage may be unavailable */
     }
@@ -300,6 +333,39 @@ export class Game {
       return localStorage.getItem(DIFFICULTY_KEY) === 'hard' ? 'hard' : 'easy';
     } catch {
       return 'easy';
+    }
+  }
+
+  private loadUnlocked(): boolean {
+    try {
+      return localStorage.getItem(UNLOCK_KEY) === '1';
+    } catch {
+      return false;
+    }
+  }
+
+  private loadMode(): Mode {
+    try {
+      return this.endlessUnlocked && localStorage.getItem(MODE_KEY) === 'endless' ? 'endless' : 'story';
+    } catch {
+      return 'story';
+    }
+  }
+
+  /** Choose the mode (only in the menu); the endless mode only once it is unlocked. */
+  setMode(m: Mode): void {
+    if (this.state !== 'menu' || (m === 'endless' && !this.endlessUnlocked) || m === this.mode) return;
+    this.mode = m;
+    setStoryMode(m === 'story');
+    // The world past the last landscape differs between the modes.
+    this.rebuildWorld();
+    this.best = this.bests[this.difficulty];
+    this.hud.setDistance(0, this.best);
+    this.showStart();
+    try {
+      localStorage.setItem(MODE_KEY, m);
+    } catch {
+      /* storage may be unavailable */
     }
   }
 
@@ -323,7 +389,7 @@ export class Game {
     if (this.state === 'menu') this.start();
     else if (this.state === 'paused') this.resume();
     else if (this.state === 'lifelost') this.continueRun();
-    else if (this.state === 'over') this.restart();
+    else if (this.state === 'over' || this.state === 'won') this.restart();
   }
 
   /** Begin playing from the menu. Pointer lock is requested but not required. */
@@ -355,7 +421,7 @@ export class Game {
     this.stopPlaying();
     this.rebuildWorld();
     this.state = 'menu';
-    this.hud.showStart(this.bests, this.difficulty);
+    this.showStart();
   }
 
   pause(): void {
@@ -443,6 +509,9 @@ export class Game {
    * the path; the distance counts from there.
    */
   private placeRunAt(reached: number): void {
+    // Never past (or right at) the cabin at the end of the story.
+    const hut = this.world.terrain.hut();
+    if (hut) reached = Math.min(reached, hut.p - 14);
     const p = this.respawnProgress(reached);
     this.placeOnPath(p);
     this.apple.maxProgress = reached;
@@ -493,6 +562,8 @@ export class Game {
   respawnClear(p: number): boolean {
     const t = this.world.terrain;
     if (t.gorgeNear(p, GORGE.rim + 5)) return false;
+    const hut = t.hut();
+    if (hut && p + APPLE_AHEAD + 1.5 > hut.p - 4) return false;
     for (const g of this.gnomes()) {
       if (g.state !== 'down' && Math.abs(-g.group.position.z - (p + APPLE_AHEAD / 2)) < 8) return false;
     }
@@ -533,6 +604,28 @@ export class Game {
     }
     this.audio.gameOver();
     this.hud.showGameOver(score, this.best, isRecord, this.lastCause, this.maxLives());
+  }
+
+  /** Story mode: the apple and the player are inside the cabin. The run is won and the endless mode unlocked. */
+  private win(): void {
+    if (this.state !== 'playing') return;
+    this.state = 'won';
+    this.stopPlaying();
+    const score = this.apple.maxProgress;
+    const isRecord = score > this.best;
+    if (isRecord) {
+      this.best = score;
+      this.saveBest();
+    }
+    const unlockedNow = !this.endlessUnlocked;
+    this.endlessUnlocked = true;
+    try {
+      localStorage.setItem(UNLOCK_KEY, '1');
+    } catch {
+      /* storage may be unavailable */
+    }
+    this.audio.chime();
+    this.hud.showWon(score, this.runTime, this.best, isRecord, unlockedNow);
   }
 
   /**
@@ -612,7 +705,7 @@ export class Game {
       }
       return;
     }
-    if (this.state === 'over' || this.state === 'menu') {
+    if (this.state === 'over' || this.state === 'won' || this.state === 'menu') {
       if (e.code === 'Enter' || e.code === 'NumpadEnter') this.onOverlayClick();
       return;
     }
@@ -653,7 +746,10 @@ export class Game {
 
   update(dt: number): void {
     const playing = this.state === 'playing';
-    if (playing) this.elapsed += dt;
+    if (playing) {
+      this.elapsed += dt;
+      this.runTime += dt;
+    }
     this.animTime += dt;
     this.world.bottles.animate(this.animTime);
 
@@ -712,6 +808,7 @@ export class Game {
       const dist = this.storm.distanceTo(this.chasedProgress());
       if (dist <= 0) this.caught(this.appleTrails() ? 'apple' : 'player');
       if (this.appleInGorge()) this.caught('gorge');
+      if (this.atHome()) this.win();
       this.updateThirst(dt);
       this.updateLandscapeLife();
       if (!this.hintFaded && this.elapsed >= HINT_SECONDS) {
@@ -757,6 +854,12 @@ export class Game {
     }
     this.hud.setThirst(this.thirst, CFG.thirst.warnBelow);
     if (this.thirst <= 0) this.caught('thirst');
+  }
+
+  /** Story mode: the apple is in the cabin and the player has followed it in. */
+  private atHome(): boolean {
+    const cabin = this.world.cabin;
+    return cabin.inside(this.apple.pos.x, this.apple.pos.z) && cabin.inside(this.player.pos.x, this.player.pos.z, 0.15);
   }
 
   /** True once the apple has dropped well below the rim of a gorge. */
@@ -834,6 +937,10 @@ export class Game {
     this.sky.uniforms.topColor.value.copy(atmo.top).lerp(TOP_STORM, dark * 0.9);
     this.sky.uniforms.cirrusAmount.value = atmo.cirrus;
     this.sky.cloudAmount = atmo.clouds;
+    // The warm light in the cabin at the end of the story.
+    const home = this.world.cabin.lightPosition(this.tmp2);
+    if (home) this.homeLight.position.copy(home);
+    this.homeLight.intensity = home ? HOME_LIGHT * (1 + 0.6 * dark) : 0;
     // Shadow-casting light follows the player.
     const p = this.player.pos;
     this.sun.position.set(p.x + SUN_DIR.x * 140, p.y + SUN_DIR.y * 140, p.z + SUN_DIR.z * 140);
@@ -943,6 +1050,19 @@ export class Game {
     this.quench();
   }
 
+  /** Unlock (or lock again) the endless mode as if the story had been won (testing only). */
+  debugUnlock(on = true): void {
+    this.endlessUnlocked = on;
+    try {
+      if (on) localStorage.setItem(UNLOCK_KEY, '1');
+      else localStorage.removeItem(UNLOCK_KEY);
+    } catch {
+      /* storage may be unavailable */
+    }
+    if (!on && this.mode === 'endless') this.setMode('story');
+    if (this.state === 'menu') this.showStart();
+  }
+
   /** Gnomes in the generated chunks (testing only). */
   debugGnomes(): Array<{ id: number; x: number; z: number; state: string; homeX: number; homeZ: number }> {
     return [...this.gnomes()].map((g) => ({ id: g.id, x: g.group.position.x, z: g.group.position.z, state: g.state, homeX: g.homeX, homeZ: g.homeZ }));
@@ -1003,6 +1123,10 @@ export class Game {
       stormPlayerDistance: this.storm.distanceTo(this.player.progress),
       appleIndicator: this.indicatorShown,
       difficulty: this.difficulty,
+      mode: this.mode,
+      endlessUnlocked: this.endlessUnlocked,
+      runTime: this.runTime,
+      atHome: this.atHome(),
       lives: this.lives,
       landscapeReached: this.landscapeReached,
       stamina: this.player.stamina,

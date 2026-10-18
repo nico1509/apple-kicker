@@ -176,6 +176,15 @@ try {
   check(s0.state === 'menu', 'game boots into the menu');
   check(s0.chunks >= 5, `initial chunks generated (${s0.chunks})`);
   check(s0.difficulty === 'easy' && s0.lives === 3, `easy with 3 lives is the default (${s0.difficulty}, ${s0.lives})`);
+  // Modes: the story is the default; the endless mode is locked until the story is won.
+  check(s0.mode === 'story' && !s0.endlessUnlocked, `story mode is the default, endless locked (${s0.mode}, ${s0.endlessUnlocked})`);
+  await clickEl('[data-mode="endless"]');
+  check((await state()).mode === 'story', 'the locked endless mode cannot be chosen');
+  // The checks below run in the endless mode (the landscapes loop, as before).
+  await page.evaluate(() => window.__appleKicker.unlockEndless());
+  await clickEl('[data-mode="endless"]');
+  const sm = await state();
+  check(sm.mode === 'endless' && sm.state === 'menu', `once unlocked the endless mode can be chosen (${sm.mode})`);
   // The gameplay checks below run in the hard mode (one life, as before).
   await clickEl('[data-difficulty="hard"]');
   check((await state()).difficulty === 'hard', 'clicking "Schwer" selects the hard mode');
@@ -924,6 +933,74 @@ try {
     const r4 = await walkAndKick('right', 300, 0);
     check(r4.after.appleProgress > gn3.appleProgress + 4, `the freed apple can be kicked on (${r4.after.appleProgress.toFixed(1)} m)`);
   }
+
+  // Story mode: every landscape once, then the snowy home stretch where the
+  // path ends at a cabin. Apple and player inside = won, endless unlocked.
+  await page.evaluate(() => {
+    const k = window.__appleKicker;
+    k.game.toMenu();
+    k.unlockEndless(false);
+    k.setMode('story');
+    k.setDifficulty('easy');
+    k.start();
+  });
+  // Starting asks for the pointer lock; losing it again pauses, so start (resume) once more.
+  await page.evaluate(() => window.__appleKicker.start());
+  await simulate(0.2);
+  const st0 = await state();
+  check(st0.mode === 'story' && !st0.endlessUnlocked && st0.state === 'playing', `a story run starts with endless locked (${st0.mode})`);
+  const hut = await page.evaluate(() => window.__appleKicker.game.world.terrain.hut());
+  check(hut && Math.abs(hut.p - 5060) < 1, `the story ends at a cabin at 5060 m (${hut && hut.p})`);
+  for (const [at, expected] of [[4500, 'town'], [5050, 'home'], [7000, 'home']]) {
+    await page.evaluate((p) => window.__appleKicker.teleport(p), at);
+    const sl = await state();
+    check(sl.landscape === expected, `story: landscape at ${at} m is ${expected} (${sl.landscape})`);
+  }
+  await page.evaluate((h) => {
+    const k = window.__appleKicker;
+    k.teleport(h.p - 30);
+    k.game.storm.progress = h.p - 200;
+  }, hut);
+  await look(0, -0.08);
+  await simulate(0.3);
+  await shot('21-cabin.png');
+  // The invisible wall: the player cannot walk past the cabin, the apple is not kicked past it.
+  const past = await page.evaluate((h) => {
+    const g = window.__appleKicker.game;
+    g.player.reset(h.cx + 8, -(h.p - 2), 0);
+    g.debugApple(h.cx - 9, -(h.p - 1));
+    g.apple.vel.set(0, 0, -12);
+    g.apple.resting = false;
+    g.storm.progress = h.p - 200;
+    window.__appleKicker.simulate(3, ['KeyW']);
+    return { player: -g.player.pos.z, apple: -g.apple.pos.z };
+  }, hut);
+  check(past.player < hut.p && past.apple < hut.p, `nobody gets past the cabin (player ${past.player.toFixed(1)}, apple ${past.apple.toFixed(1)}, front ${hut.p.toFixed(1)} m)`);
+  // Kick the apple through the open door and walk in after it.
+  await page.evaluate((h) => {
+    const g = window.__appleKicker.game;
+    g.player.reset(h.x, -(h.p - 5), 0);
+    g.debugApple(h.x, -(h.p - 3.9));
+    g.storm.progress = h.p - 200;
+  }, hut);
+  await page.evaluate(() => window.__appleKicker.start());
+  await look(0, -0.5);
+  await simulate(0.1);
+  await kick(0, -110, 'right');
+  await simulate(2.5);
+  const sk = await state();
+  check(-sk.applePz > hut.p + 0.4 && sk.state === 'playing', `the apple rolls into the cabin (${(-sk.applePz).toFixed(1)} m) and the run goes on until the player follows`);
+  await look(0, -0.15);
+  await shot('22-apple-in-cabin.png');
+  await page.evaluate(() => window.__appleKicker.game.debugThirst(1));
+  await simulate(1.6, ['KeyW']);
+  const sw3 = await state();
+  check(sw3.state === 'won', `walking in after the apple wins the story (${sw3.state})`);
+  check(sw3.endlessUnlocked, 'winning the story unlocks the endless mode');
+  await shot('23-won.png');
+  check(await page.$('.overlay h2') !== null && (await page.textContent('.overlay h2')).includes('zuhause'), 'the win screen is shown');
+  await page.evaluate(() => window.__appleKicker.game.toMenu());
+  check((await page.$('[data-mode="endless"].locked')) === null, 'the menu offers the endless mode after the win');
 
   // Frame rate estimate (software rendering, so only a rough sanity figure).
   const fps = await page.evaluate(

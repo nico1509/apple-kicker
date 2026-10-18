@@ -1,7 +1,9 @@
 import type { Foot } from '../config';
 
-export type OverlayKind = 'start' | 'paused' | 'lifelost' | 'gameover' | null;
+export type OverlayKind = 'start' | 'paused' | 'lifelost' | 'gameover' | 'won' | null;
 export type Difficulty = 'easy' | 'hard';
+/** Story: every landscape once, then the way ends. Endless: the landscapes loop (unlocked by finishing the story). */
+export type Mode = 'story' | 'endless';
 /** What ended a life: the storm caught the player or the apple, or the thirst bar ran empty. */
 export type Cause = 'player' | 'apple' | 'thirst' | 'gorge';
 
@@ -56,6 +58,7 @@ export class Hud {
   private continueHandler: (() => void) | null = null;
   private menuHandler: (() => void) | null = null;
   private difficultyHandler: ((d: Difficulty) => void) | null = null;
+  private modeHandler: ((m: Mode) => void) | null = null;
   private kickstartHandler: (() => void) | null = null;
   private lastLives = '';
   /** The game-over panel ignores clicks for a moment so the score can be read. */
@@ -136,6 +139,12 @@ export class Hud {
     this.overlay.addEventListener('click', (e) => {
       if (this.overlayKind === null) return;
       const target = e.target as HTMLElement;
+      const mode = target.closest<HTMLElement>('[data-mode]');
+      if (mode) {
+        if (mode.classList.contains('locked')) return;
+        this.modeHandler?.(mode.dataset.mode === 'endless' ? 'endless' : 'story');
+        return;
+      }
       const choice = target.closest<HTMLElement>('[data-difficulty]');
       if (choice) {
         const d = choice.dataset.difficulty === 'hard' ? 'hard' : 'easy';
@@ -161,7 +170,7 @@ export class Hud {
       }
       // After losing a life only the buttons count: a stray click must not decide.
       if (this.overlayKind === 'lifelost') return;
-      if (this.overlayKind === 'gameover' && performance.now() < this.armedAt) return;
+      if ((this.overlayKind === 'gameover' || this.overlayKind === 'won') && performance.now() < this.armedAt) return;
       this.startHandler?.();
     });
   }
@@ -188,6 +197,10 @@ export class Hud {
 
   onDifficulty(cb: (d: Difficulty) => void): void {
     this.difficultyHandler = cb;
+  }
+
+  onMode(cb: (m: Mode) => void): void {
+    this.modeHandler = cb;
   }
 
   /** Lives as apple icons; hidden when `total` is 0 (hard mode). */
@@ -319,7 +332,23 @@ export class Hud {
     return `<span class="choice-record">${best > 0 ? `Rekord <b>${Math.floor(best)} m</b>` : 'Noch kein Rekord'}</span>`;
   }
 
-  showStart(bests: Record<Difficulty, number>, difficulty: Difficulty): void {
+  private static modeHtml(mode: Mode, endlessUnlocked: boolean): string {
+    const on = (m: Mode): string => (m === mode ? ' selected' : '');
+    return `
+      <div class="difficulty mode" role="radiogroup" aria-label="Modus">
+        <button class="choice${on('story')}" role="radio" aria-checked="${mode === 'story'}" data-mode="story">
+          <span class="choice-head"><span class="choice-title">Story</span></span>
+          <span class="choice-text">Ein Weg mit Ziel. Kommst du mit deinem Apfel an?</span>
+        </button>
+        <button class="choice${on('endless')}${endlessUnlocked ? '' : ' locked'}" role="radio" aria-checked="${mode === 'endless'}"${endlessUnlocked ? '' : ' aria-disabled="true"'} data-mode="endless">
+          <span class="choice-head"><span class="choice-title">${endlessUnlocked ? '' : '🔒 '}Endlos</span></span>
+          <span class="choice-text">${endlessUnlocked ? 'Der Weg hört nie auf. Wie weit kommst du?' : 'Wird freigeschaltet, wenn du den Story-Modus geschafft hast.'}</span>
+        </button>
+      </div>`;
+  }
+
+  /** `bests` are the records of the chosen mode. */
+  showStart(bests: Record<Difficulty, number>, difficulty: Difficulty, mode: Mode = 'story', endlessUnlocked = false): void {
     this.overlayKind = 'start';
     this.overlay.hidden = false;
     this.overlay.scrollTop = 0;
@@ -330,11 +359,12 @@ export class Hud {
       </h1>
       <p class="tagline">Goldener Oktober, ein Apfel, ein Feldweg – und ein Gewitter im Nacken.</p>
       <div class="rules">
-        <p>Kicke deinen Apfel so weit wie möglich den Weg entlang. Gezählt werden die Meter, die der <b>Apfel</b> zurücklegt.</p>
+        <p>${mode === 'story' ? 'Kicke deinen Apfel den Weg entlang, bis ans Ende.' : 'Kicke deinen Apfel so weit wie möglich den Weg entlang.'} Gezählt werden die Meter, die der <b>Apfel</b> zurücklegt.</p>
         <p>Von hinten zieht eine Schlechtwetterfront heran. Holt sie dich oder deinen Apfel ein, kostet das ein Leben.</p>
         <p>Kicken macht schnell durstig: Sammle die Apfelschorle-Flaschen auf dem Weg ein. Ist die Durst-Anzeige leer, kostet das ebenfalls ein Leben.</p>
         <p>Wurzeln, Äste, Steine, Pfützen und Hügel werden mit der Zeit mehr – kick fester oder lupf drüber.</p>
       </div>
+      ${Hud.modeHtml(mode, endlessUnlocked)}
       <div class="difficulty" role="radiogroup" aria-label="Schwierigkeit">
         <button class="choice" role="radio" data-difficulty="easy">
           <span class="choice-head"><span class="choice-title">Einfach</span><span class="choice-lives">${Hud.livesHtml(EASY_LIVES, EASY_LIVES)}</span></span>
@@ -417,6 +447,28 @@ export class Hud {
         <button class="start" data-action="start">Nochmal versuchen</button>
         ${livesTotal > 0 ? Hud.kickstartHtml(best) : ''}
         <button class="start secondary" data-action="menu">Menü</button>
+      </div>
+      <p class="small">oder <kbd>Enter</kbd> drücken</p>
+    `;
+  }
+
+  /** Story mode won: the apple and the player made it home. */
+  showWon(score: number, seconds: number, best: number, isRecord: boolean, unlockedNow: boolean): void {
+    this.overlayKind = 'won';
+    this.overlay.hidden = false;
+    this.overlay.scrollTop = 0;
+    this.armedAt = performance.now() + 900;
+    const min = Math.floor(seconds / 60);
+    const sec = Math.floor(seconds % 60);
+    this.overlayContent.innerHTML = `
+      <h2>Sicher zuhause angekommen!</h2>
+      <p>Du hast deinen Apfel den ganzen Weg nach Hause gebracht. Drinnen ist es warm.</p>
+      <p class="score">Dein Apfel kam <b>${Math.floor(score)} m</b> weit, in <b>${min}:${String(sec).padStart(2, '0')} min</b>.</p>
+      ${isRecord ? '<p class="record">Neuer Rekord!</p>' : best > 0 ? `<p>Rekord: <b>${Math.floor(best)} m</b></p>` : ''}
+      ${unlockedNow ? '<p class="record">Der Endlos-Modus ist jetzt freigeschaltet!</p>' : ''}
+      <div class="buttons">
+        <button class="start" data-action="start">Nochmal spielen</button>
+        <button class="start secondary" data-action="menu">Hauptmenü</button>
       </div>
       <p class="small">oder <kbd>Enter</kbd> drücken</p>
     `;

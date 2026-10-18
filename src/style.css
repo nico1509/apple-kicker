@@ -624,6 +624,15 @@ button.choice:hover {
   opacity: 0.9;
 }
 
+button.choice.locked {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.difficulty.mode {
+  margin-bottom: 0;
+}
+
 button.choice.selected {
   opacity: 1;
   border-color: var(--accent);
