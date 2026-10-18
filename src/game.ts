@@ -631,37 +631,11 @@ export class Game {
     this.hud.showWon(score, this.runTime, this.best, isRecord, unlockedNow);
   }
 
-  /**
-   * Enter fullscreen when play starts; only works right after a click or key press, so failures are ignored.
-   * Returns a promise that settles once the switch is done, or null if nothing was requested.
-   */
-  private requestFullscreen(): Promise<void> | null {
-    const doc = document as Document & { webkitFullscreenElement?: Element | null };
-    if (document.fullscreenElement || doc.webkitFullscreenElement) return null;
-    const el = document.documentElement as HTMLElement & { webkitRequestFullscreen?: () => void };
-    try {
-      if (el.requestFullscreen) return el.requestFullscreen({ navigationUI: 'hide' }).catch(() => undefined);
-      el.webkitRequestFullscreen?.();
-    } catch {
-      /* fullscreen unavailable (e.g. iPhone): the game runs in the normal window */
-    }
-    return null;
-  }
-
-  /**
-   * Fullscreen first, then pointer lock: browsers drop a pointer lock requested
-   * while the switch to fullscreen is still running, which left a free cursor.
-   */
   private requestPointerLock(): void {
-    if (this.touch.enabled) {
-      // Touch screens have no cursor to catch: fullscreen only.
-      void this.requestFullscreen();
-      return;
-    }
+    // Touch screens have no cursor to catch.
+    if (this.touch.enabled) return;
     this.pointerLockWanted = true;
-    const fullscreen = this.requestFullscreen();
-    if (fullscreen) void fullscreen.then(() => this.lockPointer());
-    else this.lockPointer();
+    this.lockPointer();
   }
 
   private lockPointer(): void {
