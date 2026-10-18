@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { CFG } from '../config';
 import { clamp, smoothstep } from '../utils/math';
 import { mulberry32, rand } from '../utils/noise';
-import { LANDSCAPE_LENGTH } from '../world/landscape';
+import { endlessHardening, LANDSCAPE_LENGTH } from '../world/landscape';
 
 export interface StormEvents {
   onThunder(volume: number): void;
@@ -171,7 +171,11 @@ export class Storm {
     // with a rubber band whose free lead shrinks over the landscape.
     const S = CFG.storm;
     const t = (Math.max(0, chasedProgress) % LANDSCAPE_LENGTH) / LANDSCAPE_LENGTH;
-    let v = S.baseSpeed + (S.topSpeed - S.baseSpeed) * t;
+    // The endless mode keeps speeding the front up, up to a cap.
+    const hard = endlessHardening(chasedProgress);
+    const base = S.baseSpeed + CFG.endless.stormBaseExtra * hard;
+    const top = S.topSpeed + CFG.endless.stormTopExtra * hard;
+    let v = base + (top - base) * t;
     const lead = S.rubberBandDistance + (S.rubberBandMin - S.rubberBandDistance) * t;
     if (chasedDist > lead) v += (chasedDist - lead) * S.rubberBandGain;
 

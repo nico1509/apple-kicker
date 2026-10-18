@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { CFG } from '../config';
 import { clamp, lerp, smoothstep } from '../utils/math';
 import { fbm1, fbm2, hash3, mulberry32, noise1, subSeed, valueNoise2 } from '../utils/noise';
-import { HUT_PROGRESS, LANDSCAPE_LENGTH, landscapeOfIndex, landscapeWeight, storyMode, type Landscape } from './landscape';
+import { endlessHardening, HUT_PROGRESS, LANDSCAPE_LENGTH, landscapeOfIndex, landscapeWeight, rampProgress, storyMode, type Landscape } from './landscape';
 import { buildSubwaySection, SUBWAY, subwayCut, subwayStart, subwayStraight, subwayWallHalf, trainDeck, type SubwaySection } from './subway';
 
 /**
@@ -242,14 +242,19 @@ export class Terrain {
     list = [];
     const p0 = i * HILL_SEGMENT;
     const rng = mulberry32(subSeed(this.seed, 7000 + i));
-    const prob = p0 < 110 ? 0 : Math.min(0.7, 0.28 + p0 / 1600);
+    // The endless mode skips the warm-up and keeps hardening: more, higher and steeper hills.
+    const ramp = rampProgress(p0);
+    const hard = endlessHardening(p0);
+    const E = CFG.endless;
+    const prob = p0 < 110 ? 0 : lerp(Math.min(0.7, 0.28 + ramp / 1600), E.hillChanceMax, hard);
     if (rng() < prob) {
-      const difficulty = Math.min(1.7, 0.7 + p0 / 700);
+      const difficulty = Math.min(1.7, 0.7 + ramp / 700) * lerp(1, E.hillHeightMax / 4, hard);
       const r = rng();
       const kind: Hill['kind'] = r < 0.55 ? 'bump' : r < 0.8 ? 'up' : 'down';
-      const height = Math.min(4, (1.0 + rng() * 1.8) * difficulty * (kind === 'bump' ? 1 : 0.7));
+      const height = Math.min(lerp(4, E.hillHeightMax, hard), (1.0 + rng() * 1.8) * difficulty * (kind === 'bump' ? 1 : 0.7));
       // Keep the slope climbable (and rollable) by tying the length to the height.
-      const length = Math.max(14 + rng() * 14, height * (kind === 'bump' ? 7.5 : 4.5));
+      const steep = lerp(1, E.hillSteepness, hard);
+      const length = Math.max(14 + rng() * 14, height * (kind === 'bump' ? 7.5 : 4.5)) / steep;
       list.push({ start: p0 + rng() * 10, length, height, kind });
     }
     this.hillCache.set(i, list);

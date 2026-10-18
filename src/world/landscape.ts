@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { CFG } from '../config';
-import { smoothstep } from '../utils/math';
+import { clamp, smoothstep } from '../utils/math';
 
 /**
  * Landscapes change every LANDSCAPE_LENGTH metres along the path. In the
@@ -26,6 +26,20 @@ export function setStoryMode(on: boolean): void {
 
 export function storyMode(): boolean {
   return story;
+}
+
+/**
+ * Progress the warm-up ramps (obstacle density, hills, forest obstacle kinds)
+ * look at. The endless mode skips the warm-up: it starts where the second
+ * round of landscapes used to start.
+ */
+export function rampProgress(p: number): number {
+  return story ? p : p + HOME_START;
+}
+
+/** Endless mode: 0 at the start, rising to 1 over CFG.endless.rampLength; always 0 in the story. */
+export function endlessHardening(p: number): number {
+  return story ? 0 : clamp(p / CFG.endless.rampLength, 0, 1);
 }
 /** Half width (m) of the cross-fade of colours, light and backdrop at a landscape border. */
 const BLEND = 40;
