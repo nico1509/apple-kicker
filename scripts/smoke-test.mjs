@@ -65,7 +65,8 @@ const browser = await chromium.launch({
   executablePath: process.env.CHROME_PATH || undefined,
   args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist', '--autoplay-policy=no-user-gesture-required'],
 });
-const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+// German UI: the text checks below look for German words. Kickstart buttons exist only in dev builds.
+const page = await browser.newPage({ viewport: { width: 1280, height: 720 }, locale: 'de-DE' });
 const errors = [];
 page.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
 page.on('console', (msg) => {
@@ -882,11 +883,16 @@ try {
   // Kickstart (easy only): a fresh run that starts at the easy record.
   const rec = e4.best;
   check(rec >= e2.appleMax, `easy record is saved (${rec.toFixed(0)} m)`);
-  await clickEl('[data-action="kickstart"]');
+  const dev = await page.evaluate(() => window.__appleKicker.dev);
+  if (dev) await clickEl('[data-action="kickstart"]');
+  else {
+    check(!(await page.$('[data-action="kickstart"]')), 'no Kickstart button in the production build');
+    await page.evaluate(() => window.__appleKicker.kickstart());
+  }
   await simulate(0.1);
   const k0 = await state();
   check(await page.evaluate(() => !document.fullscreenElement), 'starting a run stays in the normal window');
-  check(await page.evaluate(() => document.pointerLockElement === document.querySelector('canvas')), 'the cursor is captured when a run starts');
+  if (dev) check(await page.evaluate(() => document.pointerLockElement === document.querySelector('canvas')), 'the cursor is captured when a run starts');
   await look(k0.playerYaw, -0.3);
   await simulate(0.05);
   await shot('11-kickstart.png');
@@ -930,7 +936,8 @@ try {
   await clickEl('[data-difficulty="hard"]');
   check(await page.isHidden('[data-action="kickstart"]'), 'Kickstart is not offered in the hard mode');
   await clickEl('[data-difficulty="easy"]');
-  check(await page.isVisible('[data-action="kickstart"]'), 'Kickstart is offered in the easy mode once there is a record');
+  if (dev) check(await page.isVisible('[data-action="kickstart"]'), 'Kickstart is offered in the easy mode once there is a record');
+  else check(!(await page.$('[data-action="kickstart"]')), 'no Kickstart button in the menu of the production build');
   await shot('12-menu-kickstart.png');
   await page.evaluate(() => window.__appleKicker.start());
   await page.evaluate(() => window.__appleKicker.start());
@@ -1264,6 +1271,18 @@ try {
   );
   console.log(`approx. fps (software rendering, quality=${quality}): ${fps.toFixed(1)}`);
   console.log('final state:', JSON.stringify(await state()));
+
+  // Language: German for every de-* locale (also Switzerland and Austria), English otherwise.
+  for (const [locale, want] of [['de-CH', 'de'], ['de-AT', 'de'], ['en-US', 'en'], ['fr-FR', 'en']]) {
+    const p = await browser.newPage({ viewport: { width: 1280, height: 720 }, locale });
+    await p.goto(url);
+    await p.waitForFunction(() => window.__appleKicker !== undefined, null, { timeout: 60000 });
+    const got = await p.evaluate(() => [window.__appleKicker.lang, document.documentElement.lang]);
+    const tagline = await p.textContent('.tagline');
+    const english = tagline.includes('Golden October');
+    check(got[0] === want && got[1] === want && english === (want === 'en'), `${locale} plays in ${want} (${got.join('/')}: ${tagline})`);
+    await p.close();
+  }
 } catch (e) {
   failed = true;
   console.error('test crashed:', e);

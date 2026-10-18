@@ -235,7 +235,7 @@ export class Terrain {
   }
 
   // ---------------------------------------------------------------------------
-  // Hills (the "Hügel" obstacles)
+  // Hills (the hill obstacles)
 
   private hillsInSegment(i: number): Hill[] {
     let list = this.hillCache.get(i);

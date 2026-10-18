@@ -1,4 +1,5 @@
 import type { Input } from '../entities/input';
+import { T } from '../i18n';
 
 /** Swipe pixels count this much more than mouse pixels: a phone screen is small. */
 const SWIPE_SCALE = 1.7;
@@ -44,8 +45,8 @@ export class TouchControls {
     this.layer.hidden = true;
     this.layer.innerHTML = `
       <div class="touch-stick move"><div class="touch-knob"></div></div>
-      <div class="touch-chip" aria-label="Lupfer"></div>
-      <button class="touch-pause" aria-label="Pause"></button>
+      <div class="touch-chip" aria-label="${T.chipButton}"></div>
+      <button class="touch-pause" aria-label="${T.pauseButton}"></button>
     `;
     // Below the menu overlay, so menus stay tappable.
     root.insertBefore(this.layer, root.querySelector('.overlay'));

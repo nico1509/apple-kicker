@@ -1,11 +1,15 @@
 import './style.css';
 import { Game } from './game';
+import { T, lang } from './i18n';
 import { landscapeOfIndex, setFixedLandscapeOrder } from './world/landscape';
 
 declare global {
   interface Window {
     __appleKicker?: {
       game: Game;
+      /** Dev build (Kickstart buttons shown) or production build. */
+      dev: boolean;
+      lang: 'de' | 'en';
       start: () => void;
       restart: () => void;
       kickstart: () => void;
@@ -24,6 +28,7 @@ declare global {
 }
 
 function boot(): void {
+  document.documentElement.lang = lang;
   const canvas = document.getElementById('game') as HTMLCanvasElement | null;
   const ui = document.getElementById('ui');
   if (!canvas || !ui) throw new Error('Missing #game canvas or #ui element');
@@ -32,6 +37,8 @@ function boot(): void {
     game.run();
     window.__appleKicker = {
       game,
+      dev: import.meta.env.DEV,
+      lang,
       start: () => {
         if (game.state === 'menu') game.start();
         else if (game.state === 'paused') game.resume();
@@ -53,7 +60,7 @@ function boot(): void {
     };
   } catch (err) {
     console.error(err);
-    ui.innerHTML = `<div class="overlay"><div class="overlay-content"><h2>Konnte das Spiel nicht starten</h2><p>Dein Browser unterstützt vermutlich kein WebGL.</p><p class="small">${String(err)}</p></div></div>`;
+    ui.innerHTML = `<div class="overlay"><div class="overlay-content"><h2>${T.bootFailed}</h2><p>${T.noWebgl}</p><p class="small">${String(err)}</p></div></div>`;
   }
 }
 
