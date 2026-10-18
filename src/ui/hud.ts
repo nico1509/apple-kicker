@@ -309,9 +309,9 @@ export class Hud {
     if (kick) kick.hidden = d !== 'easy';
   }
 
-  /** "Kickstart" button: start an easy run right at the record distance. */
+  /** "Kickstart" button: start an easy run right at the record distance. Dev builds only. */
   private static kickstartHtml(record: number, hidden = false): string {
-    if (record < 1) return '';
+    if (!import.meta.env.DEV || record < 1) return '';
     return `<button class="start secondary" data-action="kickstart"${hidden ? ' hidden' : ''}>${T.kickstartAt(record)}</button>`;
   }
 

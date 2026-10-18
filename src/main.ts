@@ -7,6 +7,8 @@ declare global {
   interface Window {
     __appleKicker?: {
       game: Game;
+      /** Dev build (Kickstart buttons shown) or production build. */
+      dev: boolean;
       lang: 'de' | 'en';
       start: () => void;
       restart: () => void;
@@ -35,6 +37,7 @@ function boot(): void {
     game.run();
     window.__appleKicker = {
       game,
+      dev: import.meta.env.DEV,
       lang,
       start: () => {
         if (game.state === 'menu') game.start();
