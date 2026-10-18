@@ -45,7 +45,6 @@ const UNLOCK_KEY = 'apple-kicker-endless-unlocked';
 const HOME_LIGHT = 26;
 /** The apple lies this far ahead of the player at the start and after a respawn. */
 const APPLE_AHEAD = 1.2;
-const HINT_SECONDS = 25;
 const SUN_DIR = new THREE.Vector3(0.55, 0.62, -0.5).normalize();
 const HORIZON_STORM = new THREE.Color(0x5f666f);
 const TOP_STORM = new THREE.Color(0x2e3540);
@@ -112,7 +111,6 @@ export class Game {
   private lastCause: Cause = 'player';
   /** Clock for the spinning bottles. */
   private animTime = 0;
-  private hintFaded = false;
   private indicatorShown = false;
   private pointerLockWanted = false;
   private readonly rafLoop = (now: number): void => this.frame(now);
@@ -270,7 +268,6 @@ export class Game {
     this.tipObstacles = false;
     this.tipStorm = false;
     this.shownHints.clear();
-    this.hintFaded = false;
     this.player.update(0, this.apple, true);
     this.updateLighting();
     this.hud.setLives(this.lives, this.maxLives());
@@ -406,7 +403,6 @@ export class Game {
     }
     this.state = 'playing';
     this.hud.hideOverlay();
-    this.hud.setHintVisible(true);
     this.audio.chime();
     this.requestPointerLock();
     this.input.cancelDrag();
@@ -821,10 +817,6 @@ export class Game {
       if (this.atHome()) this.win();
       this.updateThirst(dt);
       this.updateLandscapeLife();
-      if (!this.hintFaded && this.elapsed >= HINT_SECONDS) {
-        this.hintFaded = true;
-        this.hud.setHintVisible(false);
-      }
       if (!this.tipObstacles && this.apple.maxProgress > 34) {
         this.tipObstacles = true;
         this.hud.message(`Hindernisse voraus! Fester kicken – oder mit ${this.touch.enabled ? 'dem roten Knopf' : 'Leertaste'} lupfen.`, 3200);

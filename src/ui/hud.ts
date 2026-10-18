@@ -48,7 +48,6 @@ export class Hud {
   private readonly overlay: HTMLElement;
   private readonly overlayContent: HTMLElement;
   private readonly vignette: HTMLElement;
-  private readonly hints: HTMLElement[];
   private readonly livesEl: HTMLElement;
   private messageTimer: number | null = null;
   private startHandler: (() => void) | null = null;
@@ -98,17 +97,6 @@ export class Hud {
       </div>
       <div class="apple-indicator" hidden><span class="chevron">➤</span><span class="ind-label"></span></div>
       <div class="message" hidden></div>
-      <div class="bottom-stack">
-        <div class="hint only-touch">
-          <span><b>Linker Stick</b> laufen, über den Rand = sprinten</span><span><b>Rechter Stick</b> umsehen</span>
-          <span><b>Wischen</b> = Kick</span><span><b>Roter Knopf</b> halten = Lupfer</span>
-        </div>
-        <div class="hint only-mouse">
-          <span><b>WASD</b> laufen</span><span><b>Shift</b> sprinten</span>
-          <span><b>Maustaste</b> halten, ziehen, loslassen = Kick</span>
-          <span><b>Leertaste</b> halten = Lupfer</span>
-        </div>
-      </div>
       <div class="overlay" hidden><div class="overlay-content"></div></div>
     `;
     const q = <T extends HTMLElement>(sel: string): T => {
@@ -136,7 +124,6 @@ export class Hud {
     this.overlay = q('.overlay');
     this.overlayContent = q('.overlay-content');
     this.vignette = q('.vignette');
-    this.hints = Array.from(root.querySelectorAll<HTMLElement>('.hint'));
     this.livesEl = q('[data-lives]');
     this.overlay.addEventListener('click', (e) => {
       if (this.overlayKind === null) return;
@@ -295,10 +282,6 @@ export class Hud {
     }, duration);
   }
 
-  setHintVisible(v: boolean): void {
-    for (const h of this.hints) h.classList.toggle('faded', !v);
-  }
-
   /** Marker pointing to the apple (off screen, or in view when it is far away). */
   setAppleIndicator(visible: boolean, x: number, y: number, angle: number, distance: number, inView = false): void {
     this.indicator.classList.toggle('in-view', visible && inView);
@@ -382,20 +365,16 @@ export class Hud {
         <button class="start" data-action="start"><span class="only-mouse">Klicken</span><span class="only-touch">Tippen</span> zum Starten</button>
         ${Hud.kickstartHtml(bests.easy)}
       </div>
-      <div class="controls only-touch">
-        <div><b>Linker Stick</b> laufen · bis über den Rand schieben = sprinten</div>
-        <div><b>Rechter Stick</b> umsehen</div>
-        <div><b>Wischen</b> = Kick · Wischrichtung = Schussrichtung, Wischlänge = Kraft · kurz tippen = Stupser</div>
-        <div><b>Roten Knopf</b> beim Loslassen halten = hoher Lupfer über Hindernisse</div>
+      <div class="hint only-touch">
+        <span><b>Linker Stick</b> laufen, über den Rand = sprinten</span><span><b>Rechter Stick</b> umsehen</span>
+        <span><b>Wischen</b> = Kick</span><span><b>Roter Knopf</b> halten = Lupfer</span>
       </div>
-      <div class="controls only-mouse">
-        <div><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> laufen · <kbd>Shift</kbd> sprinten</div>
-        <div><kbd>Linke Maustaste</kbd> halten &amp; ziehen = Kick</div>
-        <div>Zugrichtung = Schussrichtung, Zuglänge = Kraft · kurzer Klick = Stupser</div>
-        <div><kbd>Leertaste</kbd> beim Loslassen halten = hoher Lupfer über Hindernisse</div>
-        <div><kbd>M</kbd> Ton an/aus</div>
+      <div class="hint only-mouse">
+        <span><b>WASD</b> laufen</span><span><b>Shift</b> sprinten</span>
+        <span><b>Maustaste</b> halten, ziehen, loslassen = Kick</span>
+        <span><b>Leertaste</b> halten = Lupfer</span>
       </div>
-      <p class="small only-mouse">Der Mauszeiger wird im Spiel eingefangen · <kbd>Esc</kbd> oder <kbd>P</kbd> pausiert</p>
+      <p class="small only-mouse">Der Mauszeiger wird im Spiel eingefangen · <kbd>Esc</kbd> oder <kbd>P</kbd> pausiert · <kbd>M</kbd> Ton an/aus</p>
     `;
     this.selectDifficulty(difficulty);
   }
