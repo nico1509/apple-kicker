@@ -345,7 +345,7 @@ export class Hud {
       <div class="rules">
         <p>${mode === 'story' ? 'Kicke deinen Apfel den Weg entlang, bis ans Ende.' : 'Kicke deinen Apfel so weit wie möglich den Weg entlang.'} Gezählt werden die Meter, die der <b>Apfel</b> zurücklegt.</p>
         <p>Von hinten zieht eine Schlechtwetterfront heran. Holt sie dich oder deinen Apfel ein, kostet das ein Leben.</p>
-        <p>Kicken macht schnell durstig: Sammle die Apfelschorle-Flaschen auf dem Weg ein. Ist die Durst-Anzeige leer, kostet das ebenfalls ein Leben.</p>
+        <p>Kicken macht schnell durstig: Sammle die Apfelschorle-Flaschen auf dem Weg ein, sie füllen auch deine Ausdauer auf. Ist die Durst-Anzeige leer, kostet das ebenfalls ein Leben.</p>
         <p>Wurzeln, Äste, Steine, Pfützen und Hügel werden mit der Zeit mehr – kick fester oder lupf drüber.</p>
       </div>
       ${Hud.modeHtml(mode, endlessUnlocked)}

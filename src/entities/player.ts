@@ -100,6 +100,12 @@ export class Player {
     this.exhausted = CFG.player.exhaustedSeconds;
   }
 
+  /** A bottle of apple spritzer: the stamina bar is full again and any breathlessness is over. */
+  refillStamina(): void {
+    this.stamina = 1;
+    this.exhausted = 0;
+  }
+
   /** Push the player by (dx, dz) metres; applied smoothly over a few frames. */
   shove(dx: number, dz: number): void {
     this.shoveX += dx;
