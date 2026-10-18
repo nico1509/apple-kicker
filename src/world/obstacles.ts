@@ -5,7 +5,8 @@ import { ZombieFactory, type Zombie } from '../entities/zombie';
 import { lerp, smoothstep } from '../utils/math';
 import { mulberry32, rand, subSeed, type Rng } from '../utils/noise';
 import { ColliderStore, SURFACES, type Surface } from './colliders';
-import { LANDSCAPE_LENGTH, landscapeAt } from './landscape';
+import { CFG } from '../config';
+import { endlessHardening, LANDSCAPE_LENGTH, landscapeAt, rampProgress } from './landscape';
 import { subwayStraight } from './subway';
 import { GORGE, Terrain, type Gorge } from './terrain';
 
@@ -114,11 +115,13 @@ export class Obstacles {
   /** Obstacles per metre of track. */
   static density(p: number): number {
     if (p < 40) return 0;
-    return lerp(1 / 26, 1 / 8.5, smoothstep(40, 900, p));
+    const base = lerp(1 / 26, 1 / 8.5, smoothstep(40, 900, rampProgress(p)));
+    return lerp(base, CFG.endless.densityMax, endlessHardening(p));
   }
 
   private pickKind(p: number, rng: Rng): ObstacleKind {
     const land = landscapeAt(p);
+    const rp = rampProgress(p);
     const weights: Array<[ObstacleKind, number]> = land === 'town' ? [
       ['car', 1.0],
       ['barrier', 0.9],
@@ -148,10 +151,10 @@ export class Obstacles {
     ] : [
       ['root', 1.0],
       ['branch', 0.7],
-      ['stone', p > 80 ? 0.55 : 0],
-      ['log', 1.3 * smoothstep(120, 420, p)],
-      ['puddle', p > 150 ? 0.6 : 0],
-      ['gnome', p > 90 ? 0.4 : 0],
+      ['stone', rp > 80 ? 0.55 : 0],
+      ['log', 1.3 * smoothstep(120, 420, rp)],
+      ['puddle', rp > 150 ? 0.6 : 0],
+      ['gnome', rp > 90 ? 0.4 : 0],
     ];
     let total = 0;
     for (const [, w] of weights) total += w;
