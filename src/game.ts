@@ -521,7 +521,7 @@ export class Game {
     this.landscapeReached = Math.max(this.landscapeReached, Math.floor(p / LANDSCAPE_LENGTH));
     this.iceMonster.dismiss();
     this.storm.reset();
-    this.storm.placeBehind(p);
+    this.storm.placeBehind(p - PLAYER_BEHIND);
     // The storm's speed follows the position within the landscape by itself.
     this.elapsed = 0;
     this.quench();

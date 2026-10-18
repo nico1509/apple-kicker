@@ -202,9 +202,9 @@ try {
   await simulate(0.3);
   await shot('02-start-legs.png');
 
-  await simulate(0.6, ['KeyW']);
+  await simulate(0.9, ['KeyW']);
   const s2 = await state();
-  // The apple sits 1.2 m ahead: the body bumps it and is held back a little.
+  // The apple sits 2.5 m ahead: the body bumps it and is held back a little.
   check(s2.playerZ < s1.playerZ - 0.8, `player walks forward (${s2.playerZ.toFixed(2)} m)`);
   check(s2.appleProgress > 1.3 || !s2.appleResting, `walking into the apple nudges it (${s2.appleProgress.toFixed(2)} m)`);
 
@@ -851,7 +851,8 @@ try {
   await look(e2.playerYaw, -0.3);
   await simulate(0.05);
   await shot('09-continue.png');
-  const clear = await page.evaluate(() => window.__appleKicker.game.respawnClear(window.__appleKicker.game.player.progress));
+  // The player stands 1.3 m behind the spot that was checked.
+  const clear = await page.evaluate(() => window.__appleKicker.game.respawnClear(window.__appleKicker.game.player.progress + 1.3));
   check(e2.state === 'playing' && e2.lives === 2, `"Weitermachen" continues the run (${e2.state})`);
   check(e2.appleMax === e1.appleMax, `distance reached is kept (${e2.appleMax.toFixed(1)} m)`);
   const pp = -e2.playerZ;
