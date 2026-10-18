@@ -8,6 +8,7 @@ import { IceMonster, RAGE_HALF_LENGTH } from './entities/icemonster';
 import { Input } from './entities/input';
 import { Player, type PlayerEvents } from './entities/player';
 import { ZombieHorde, type Zombie } from './entities/zombie';
+import { TouchControls } from './ui/touch';
 import { EASY_LIVES, Hud, type Cause, type Difficulty, type Mode } from './ui/hud';
 import { clamp, lerp, smoothstep } from './utils/math';
 import { Storm } from './weather/storm';
@@ -58,6 +59,7 @@ export class Game {
   readonly renderer: THREE.WebGLRenderer;
   readonly scene = new THREE.Scene();
   readonly input: Input;
+  readonly touch: TouchControls;
   readonly hud: Hud;
   readonly audio = new AudioEngine();
   readonly sky: Sky;
@@ -153,6 +155,9 @@ export class Game {
     this.sky = new Sky(this.scene, SUN_DIR);
     this.input = new Input(canvas);
     this.hud = new Hud(uiRoot);
+    this.touch = new TouchControls(this.input, this.hud.root, () => this.pause());
+    this.hud.setTouch(this.touch.enabled);
+    this.touch.onEnable(() => this.hud.setTouch(true));
     this.storm = new Storm(this.scene, {
       onThunder: (v) => this.audio.thunder(this.state === 'playing' ? v : v * 0.5),
     });
@@ -406,7 +411,7 @@ export class Game {
     this.requestPointerLock();
     this.input.cancelDrag();
     this.input.enabled = true;
-    this.hud.message('Lauf zum Apfel. Maustaste halten, ziehen, loslassen = Kick!', 3800);
+    this.hud.message(this.touch.enabled ? 'Lauf zum Apfel. Wischen = Kick!' : 'Lauf zum Apfel. Maustaste halten, ziehen, loslassen = Kick!', 3800);
   }
 
   restart(): void {
@@ -650,6 +655,11 @@ export class Game {
    * while the switch to fullscreen is still running, which left a free cursor.
    */
   private requestPointerLock(): void {
+    if (this.touch.enabled) {
+      // Touch screens have no cursor to catch: fullscreen only.
+      void this.requestFullscreen();
+      return;
+    }
     this.pointerLockWanted = true;
     const fullscreen = this.requestFullscreen();
     if (fullscreen) void fullscreen.then(() => this.lockPointer());
@@ -817,7 +827,7 @@ export class Game {
       }
       if (!this.tipObstacles && this.apple.maxProgress > 34) {
         this.tipObstacles = true;
-        this.hud.message('Hindernisse voraus! Fester kicken – oder mit Leertaste lupfen.', 3200);
+        this.hud.message(`Hindernisse voraus! Fester kicken – oder mit ${this.touch.enabled ? 'dem roten Knopf' : 'Leertaste'} lupfen.`, 3200);
       }
       if (!this.tipStorm && dist < 40) {
         this.tipStorm = true;
@@ -950,6 +960,7 @@ export class Game {
 
   private updateHud(): void {
     const hud = this.hud;
+    this.touch.setActive(this.state === 'playing');
     hud.setDistance(this.apple.maxProgress, Math.max(this.best, this.apple.maxProgress));
     const dist = this.storm.distanceTo(this.chasedProgress());
     hud.setStorm(dist, clamp(1 - dist / 110, 0, 1), this.appleTrails());
@@ -959,7 +970,7 @@ export class Game {
     if (drag && this.state === 'playing') {
       const tap = Math.hypot(drag.dx, drag.dy) < CFG.kick.tapThresholdPx;
       const { power } = Player.evalDrag(drag.dx, drag.dy, false);
-      hud.setDrag(drag.dx, drag.dy, power, this.input.isDown('Space'), tap);
+      hud.setDrag(drag.dx, drag.dy, power, this.input.chipHeld(), tap);
     } else {
       hud.clearDrag();
     }

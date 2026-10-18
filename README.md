@@ -42,6 +42,18 @@ Auf schwachen Rechnern `?quality=low` oder `?quality=medium` an die Adresse hän
 Die **Zugrichtung** bestimmt die Schussrichtung (nach oben ziehen = geradeaus),
 die **Zuglänge** die Kraft. Der Apfel muss dicht vor deinen Füßen liegen.
 
+#### Touch-Steuerung
+
+Auf Handys und Tablets erscheinen automatisch halbtransparente Bedienelemente:
+
+| Eingabe | Aktion |
+| --- | --- |
+| linker Stick | laufen (bis über den Rand geschoben = sprinten) |
+| rechter Stick | umsehen |
+| wischen (irgendwo sonst auf dem Bildschirm) | Kick, wie mit der Maus: Wischrichtung = Schussrichtung, Wischlänge = Kraft; kurz tippen = Stupser |
+| roter Knopf neben dem linken Stick halten | hoher Lupfer |
+| Pause-Knopf rechts oben | Pause |
+
 ### Regeln
 
 * Gezählt werden die Meter, die der **Apfel** entlang des Weges zurücklegt.

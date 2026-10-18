@@ -28,6 +28,14 @@ export class Input {
   readonly keys = new Set<string>();
   drag: DragState | null = null;
   readonly kicks: KickRequest[] = [];
+  /** Touch movement stick, -1..1 each (y < 0 = forward). */
+  readonly moveStick = { x: 0, y: 0 };
+  /** Movement stick pushed past its rim: sprint. */
+  sprintStick = false;
+  /** Touch look stick, -1..1 each: turns the view at a rate while held. */
+  readonly lookStick = { x: 0, y: 0 };
+  /** Touch chip button held. */
+  chipButton = false;
   private lookDX = 0;
   private lookDY = 0;
   private lastClientX: number | null = null;
@@ -87,6 +95,7 @@ export class Input {
   private readonly onBlur = (): void => {
     this.keys.clear();
     this.drag = null;
+    this.resetTouch();
   };
   private readonly onMouseLeave = (): void => {
     // Without pointer lock the cursor may re-enter anywhere: do not turn the
@@ -111,7 +120,34 @@ export class Input {
     if (!this.drag) return;
     const d = this.drag;
     this.drag = null;
-    this.kicks.push({ foot: d.foot, dx: d.dx, dy: d.dy, chip: this.keys.has('Space'), tap: false, lookAfter: 0 });
+    this.kicks.push({ foot: d.foot, dx: d.dx, dy: d.dy, chip: this.chipHeld(), tap: false, lookAfter: 0 });
+  }
+
+  /** Start a kick drag from a touch swipe (like holding the left mouse button). */
+  startDrag(): boolean {
+    if (!this.enabled || this.drag) return false;
+    this.drag = { foot: 'right', dx: 0, dy: 0 };
+    return true;
+  }
+
+  /** Add swipe movement to the current kick drag. */
+  dragBy(dx: number, dy: number): void {
+    if (!this.drag) return;
+    this.drag.dx += dx;
+    this.drag.dy += dy;
+  }
+
+  /** True while a chip is asked for (space bar or the touch button). */
+  chipHeld(): boolean {
+    return this.keys.has('Space') || this.chipButton;
+  }
+
+  /** Let go of all touch controls (pause, game over, controls hidden). */
+  resetTouch(): void {
+    this.moveStick.x = this.moveStick.y = 0;
+    this.lookStick.x = this.lookStick.y = 0;
+    this.sprintStick = false;
+    this.chipButton = false;
   }
 
   /** Cancel any pending drag and queued kick requests (pause, game over). */

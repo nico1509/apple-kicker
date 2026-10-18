@@ -715,3 +715,96 @@ button.choice.selected {
     padding: 22px 18px;
   }
 }
+
+/* Touch screens: show the touch help instead of keys and mouse. */
+#ui:not(.touch) .only-touch,
+#ui.touch .only-mouse {
+  display: none !important;
+}
+
+#ui.touch .crosshair {
+  display: none;
+}
+
+#ui.touch .bottom-stack {
+  bottom: calc(158px + env(safe-area-inset-bottom));
+}
+
+/* On-screen controls: half-transparent sticks, the chip button and a pause button. */
+.touch-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: auto;
+  touch-action: none;
+  -webkit-touch-callout: none;
+}
+
+.touch-stick {
+  position: absolute;
+  bottom: calc(28px + env(safe-area-inset-bottom));
+  width: 124px;
+  height: 124px;
+  border-radius: 50%;
+  border: 3px solid rgba(255, 255, 255, 0.45);
+  background: rgba(255, 255, 255, 0.12);
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.touch-stick.move {
+  left: calc(28px + env(safe-area-inset-left));
+}
+
+.touch-stick.look {
+  right: calc(28px + env(safe-area-inset-right));
+}
+
+.touch-stick.held {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.touch-stick.sprint {
+  border-color: rgba(155, 211, 106, 0.85);
+}
+
+.touch-knob {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 52px;
+  height: 52px;
+  margin: -26px 0 0 -26px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.45);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
+}
+
+.touch-chip {
+  position: absolute;
+  left: calc(176px + env(safe-area-inset-left));
+  bottom: calc(64px + env(safe-area-inset-bottom));
+  width: 54px;
+  height: 54px;
+  border-radius: 12px;
+  border: 3px solid rgba(255, 120, 110, 0.6);
+  background: rgba(224, 40, 30, 0.45);
+  transition: transform 0.08s, background 0.08s;
+}
+
+.touch-chip.pressed {
+  transform: scale(0.92);
+  background: rgba(224, 40, 30, 0.75);
+}
+
+.touch-pause {
+  position: absolute;
+  right: calc(16px + env(safe-area-inset-right));
+  top: calc(108px + env(safe-area-inset-top));
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: rgba(20, 24, 18, 0.45)
+    linear-gradient(90deg, transparent 15px, rgba(255, 255, 255, 0.8) 15px, rgba(255, 255, 255, 0.8) 19px, transparent 19px, transparent 25px, rgba(255, 255, 255, 0.8) 25px, rgba(255, 255, 255, 0.8) 29px, transparent 29px)
+    center / 44px 16px no-repeat;
+}

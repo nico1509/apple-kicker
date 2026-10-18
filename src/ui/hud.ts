@@ -48,7 +48,7 @@ export class Hud {
   private readonly overlay: HTMLElement;
   private readonly overlayContent: HTMLElement;
   private readonly vignette: HTMLElement;
-  private readonly hint: HTMLElement;
+  private readonly hints: HTMLElement[];
   private readonly livesEl: HTMLElement;
   private messageTimer: number | null = null;
   private startHandler: (() => void) | null = null;
@@ -99,7 +99,11 @@ export class Hud {
       <div class="apple-indicator" hidden><span class="chevron">➤</span><span class="ind-label"></span></div>
       <div class="message" hidden></div>
       <div class="bottom-stack">
-        <div class="hint">
+        <div class="hint only-touch">
+          <span><b>Linker Stick</b> laufen, über den Rand = sprinten</span><span><b>Rechter Stick</b> umsehen</span>
+          <span><b>Wischen</b> = Kick</span><span><b>Roter Knopf</b> halten = Lupfer</span>
+        </div>
+        <div class="hint only-mouse">
           <span><b>WASD</b> laufen</span><span><b>Shift</b> sprinten</span>
           <span><b>Maustaste</b> halten, ziehen, loslassen = Kick</span>
           <span><b>Leertaste</b> halten = Lupfer</span>
@@ -132,7 +136,7 @@ export class Hud {
     this.overlay = q('.overlay');
     this.overlayContent = q('.overlay-content');
     this.vignette = q('.vignette');
-    this.hint = q('.hint');
+    this.hints = Array.from(root.querySelectorAll<HTMLElement>('.hint'));
     this.livesEl = q('[data-lives]');
     this.overlay.addEventListener('click', (e) => {
       if (this.overlayKind === null) return;
@@ -292,7 +296,7 @@ export class Hud {
   }
 
   setHintVisible(v: boolean): void {
-    this.hint.classList.toggle('faded', !v);
+    for (const h of this.hints) h.classList.toggle('faded', !v);
   }
 
   /** Marker pointing to the apple (off screen, or in view when it is far away). */
@@ -375,17 +379,23 @@ export class Hud {
         </button>
       </div>
       <div class="buttons">
-        <button class="start" data-action="start">Klicken zum Starten</button>
+        <button class="start" data-action="start"><span class="only-mouse">Klicken</span><span class="only-touch">Tippen</span> zum Starten</button>
         ${Hud.kickstartHtml(bests.easy)}
       </div>
-      <div class="controls">
+      <div class="controls only-touch">
+        <div><b>Linker Stick</b> laufen · bis über den Rand schieben = sprinten</div>
+        <div><b>Rechter Stick</b> umsehen</div>
+        <div><b>Wischen</b> = Kick · Wischrichtung = Schussrichtung, Wischlänge = Kraft · kurz tippen = Stupser</div>
+        <div><b>Roten Knopf</b> beim Loslassen halten = hoher Lupfer über Hindernisse</div>
+      </div>
+      <div class="controls only-mouse">
         <div><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> laufen · <kbd>Shift</kbd> sprinten</div>
         <div><kbd>Linke Maustaste</kbd> halten &amp; ziehen = Kick</div>
         <div>Zugrichtung = Schussrichtung, Zuglänge = Kraft · kurzer Klick = Stupser</div>
         <div><kbd>Leertaste</kbd> beim Loslassen halten = hoher Lupfer über Hindernisse</div>
         <div><kbd>M</kbd> Ton an/aus</div>
       </div>
-      <p class="small">Der Mauszeiger wird im Spiel eingefangen · <kbd>Esc</kbd> oder <kbd>P</kbd> pausiert</p>
+      <p class="small only-mouse">Der Mauszeiger wird im Spiel eingefangen · <kbd>Esc</kbd> oder <kbd>P</kbd> pausiert</p>
     `;
     this.selectDifficulty(difficulty);
   }
@@ -402,7 +412,7 @@ export class Hud {
         <button class="start secondary" data-action="restart">Neustart</button>
         <button class="start secondary" data-action="menu">Hauptmenü</button>
       </div>
-      <p class="small"><kbd>Enter</kbd> / <kbd>P</kbd> = weiter · <kbd>R</kbd> = Neustart</p>
+      <p class="small only-mouse"><kbd>Enter</kbd> / <kbd>P</kbd> = weiter · <kbd>R</kbd> = Neustart</p>
     `;
   }
 
@@ -424,7 +434,7 @@ export class Hud {
       <p>${left === 1 ? 'Noch <b>1 Leben</b>' : `Noch <b>${left} Leben</b>`} · dein Apfel ist bei <b>${Math.floor(score)} m</b>.</p>
       <button class="start" data-action="continue">Weitermachen</button>
       <button class="start secondary" data-action="restart">Neu starten</button>
-      <p class="small"><kbd>Enter</kbd> = weitermachen bei ${Math.floor(score)} m · <kbd>R</kbd> = neu starten mit allen Leben</p>
+      <p class="small only-mouse"><kbd>Enter</kbd> = weitermachen bei ${Math.floor(score)} m · <kbd>R</kbd> = neu starten mit allen Leben</p>
     `;
   }
 
@@ -444,7 +454,7 @@ export class Hud {
         ${livesTotal > 0 ? Hud.kickstartHtml(best) : ''}
         <button class="start secondary" data-action="menu">Menü</button>
       </div>
-      <p class="small">oder <kbd>Enter</kbd> drücken</p>
+      <p class="small only-mouse">oder <kbd>Enter</kbd> drücken</p>
     `;
   }
 
@@ -466,8 +476,13 @@ export class Hud {
         <button class="start" data-action="start">Nochmal spielen</button>
         <button class="start secondary" data-action="menu">Hauptmenü</button>
       </div>
-      <p class="small">oder <kbd>Enter</kbd> drücken</p>
+      <p class="small only-mouse">oder <kbd>Enter</kbd> drücken</p>
     `;
+  }
+
+  /** Touch screen: show the touch controls' help instead of keys and mouse. */
+  setTouch(on: boolean): void {
+    this.root.classList.toggle('touch', on);
   }
 
   hideOverlay(): void {

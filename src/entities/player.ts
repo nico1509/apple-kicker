@@ -25,6 +25,12 @@ interface KickState {
   done: boolean;
 }
 
+/** Touch look stick: turning rates in radians per second at full deflection. */
+const TOUCH_TURN_RATE = 2.6;
+const TOUCH_PITCH_RATE = 1.4;
+/** Touch movement stick: deflection below this is ignored. */
+const TOUCH_DEAD_ZONE = 0.12;
+
 /** Seconds into the swing at which the foot meets the apple. */
 const KICK_CONTACT_TIME = 0.21;
 
@@ -153,8 +159,11 @@ export class Player {
     if (!paused) {
       // ----- look
       const look = input.consumeLook();
-      this.yaw -= look.dx * CFG.player.lookSensitivity;
-      this.pitch = clamp(this.pitch - look.dy * CFG.player.lookSensitivity, CFG.player.pitchMin, CFG.player.pitchMax);
+      // The touch look stick turns at a rate; squared for fine aiming near the centre.
+      const sx = input.lookStick.x * Math.abs(input.lookStick.x);
+      const sy = input.lookStick.y * Math.abs(input.lookStick.y);
+      this.yaw -= look.dx * CFG.player.lookSensitivity + sx * TOUCH_TURN_RATE * dt;
+      this.pitch = clamp(this.pitch - look.dy * CFG.player.lookSensitivity - sy * TOUCH_PITCH_RATE * dt, CFG.player.pitchMin, CFG.player.pitchMax);
     }
 
     // ----- movement
@@ -162,14 +171,22 @@ export class Player {
     const rgt = this.right(this.rgt);
     let mx = 0;
     let mz = 0;
+    // Share of the full speed: the touch stick walks slower when pushed only a little.
+    let throttle = 1;
     if (!paused && this.exhausted <= 0) {
       if (input.isDown('KeyW') || input.isDown('ArrowUp')) mz += 1;
       if (input.isDown('KeyS') || input.isDown('ArrowDown')) mz -= 1;
       if (input.isDown('KeyD') || input.isDown('ArrowRight')) mx += 1;
       if (input.isDown('KeyA') || input.isDown('ArrowLeft')) mx -= 1;
+      const stick = Math.hypot(input.moveStick.x, input.moveStick.y);
+      if (mx === 0 && mz === 0 && stick > TOUCH_DEAD_ZONE) {
+        mx = input.moveStick.x;
+        mz = -input.moveStick.y;
+        throttle = clamp((stick - TOUCH_DEAD_ZONE) / (0.85 - TOUCH_DEAD_ZONE), 0.35, 1);
+      }
     }
     const moving = mx !== 0 || mz !== 0;
-    const wantSprint = !paused && moving && (input.isDown('ShiftLeft') || input.isDown('ShiftRight')) && this.stamina > 0;
+    const wantSprint = !paused && moving && (input.isDown('ShiftLeft') || input.isDown('ShiftRight') || input.sprintStick) && this.stamina > 0;
     this.sprinting = wantSprint;
     if (paused) {
       // Freeze: no sliding, no stamina regeneration while the world stands still.
@@ -193,7 +210,7 @@ export class Player {
       const slopeFactor = clamp(1 - Math.max(0, slope) * 1.2, 0.55, 1);
       const bushFactor = lerp(1, 0.4, this.inBush);
       const kickFactor = this.kick ? 0.35 : 1;
-      const targetSpeed = (wantSprint ? CFG.player.sprintSpeed : CFG.player.walkSpeed) * slopeFactor * bushFactor * kickFactor;
+      const targetSpeed = (wantSprint ? CFG.player.sprintSpeed : CFG.player.walkSpeed * throttle) * slopeFactor * bushFactor * kickFactor;
       const tx = fwd.x * mz + rgt.x * mx;
       const tz = fwd.z * mz + rgt.z * mx;
       const tl = Math.hypot(tx, tz) || 1;
